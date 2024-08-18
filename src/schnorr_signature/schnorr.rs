@@ -1,6 +1,6 @@
-use subtle::ConstantTimeEq as _;
+// use subtle::ConstantTimeEq as _;
 use ark_serialize::CanonicalSerialize;
-use serde::Serialize;
+// use serde::Serialize;
 use ark_ed_on_bls12_381::{EdwardsProjective, EdwardsParameters};
 
 // type C = EdwardsProjective;
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use sha2::Digest as _;
 use ark_crypto_primitives::{Error, SignatureScheme};
-use ark_ec::{twisted_edwards_extended::{GroupAffine, GroupProjective}, AffineCurve, ProjectiveCurve};
+use ark_ec::{twisted_edwards_extended::GroupAffine, AffineCurve, ProjectiveCurve};
 use ark_ff::{
     bytes::ToBytes,
     fields::{Field, PrimeField},
@@ -23,12 +23,15 @@ use blake2::Blake2s;
 use digest::Digest;
 // use crate::schnorr_signature::{AggregateSignatureScheme};
 use musig2::{
-    errors::{KeyAggError, RoundContributionError, SignerIndexError},
-    tagged_hashes::{KEYAGG_COEFF_TAG_HASHER, KEYAGG_LIST_TAG_HASHER, MUSIG_AUX_TAG_HASHER, MUSIG_NONCE_TAG_HASHER},
-    NonceSeed
+    errors::{KeyAggError, RoundContributionError, RoundFinalizeError, SignerIndexError}, tagged_hashes::{KEYAGG_COEFF_TAG_HASHER, KEYAGG_LIST_TAG_HASHER, MUSIG_AUX_TAG_HASHER, MUSIG_NONCE_TAG_HASHER}, LiftedSignature, NonceSeed
 };
 
 use derivative::Derivative;
+
+type MaybePoint = <C as ProjectiveCurve>::Affine;
+// NOTE: 
+// MaybePoint - point on bls12_381 (Affine, like PublicKey?)
+// MaybeScalar - scalarfield element of bls12_381 (basically PrivateKey)
 
 pub struct Schnorr<C: ProjectiveCurve> {
     _group: PhantomData<C>,
@@ -110,7 +113,7 @@ where
         // (k, e);
         let (random_scalar, verifier_challenge) = {
             // Sample a random scalar `k` from the prime scalar field.
-            let random_scalar  = C::ScalarField::rand(rng);
+            let random_scalar: C::ScalarField = C::ScalarField::rand(rng);
             // Commit to the random scalar via r := k · G.
             // This is the prover's first msg in the Sigma protocol.
             let prover_commitment = parameters.generator.mul(random_scalar).into_affine();
@@ -617,8 +620,8 @@ impl<'snb> SecNonceBuilder<'snb> {
             k2
         };
 
-        let seckey1 = SecretKey {secret_key: k1, public_key: PublicKey::default()};
-        let seckey2 = SecretKey {secret_key: k2, public_key: PublicKey::default()};
+        let seckey1 = SecretKey {secret_key: k1, public_key: PublicKey::<EdwardsProjective>::default()};
+        let seckey2 = SecretKey {secret_key: k2, public_key: PublicKey::<EdwardsProjective>::default()};
         SecNonce { k1: seckey1, k2: seckey2 }
     }
 }
@@ -670,7 +673,6 @@ pub struct PubNonce {
     pub R1: Point,
     pub R2: Point,
 }
-
 
 
 /// A state machine which manages the first round of a MuSig2 signing session.
@@ -733,5 +735,441 @@ impl FirstRound {
             signer_index,
             pubnonce_slots,
         })
+    }
+
+    pub fn finalize<M>(
+        self,
+        seckey: impl Into<Scalar>,
+        message: M,
+    ) -> Result<SecondRound<M>, RoundFinalizeError>
+    where
+        M: AsRef<[u8]>,
+    {
+        self.finalize_adaptor(seckey, MaybePoint::Infinity, message)
+    }
+
+    /// Finishes the first round once all nonces are received, combining nonces
+    /// into an aggregated nonce, and creating a partial adaptor signature using
+    /// `seckey` on a given `message`, both of which are stored in the returned
+    /// `SecondRound`.
+    ///
+    /// The `adaptor_point` is used to verifiably encrypt the partial signature, so that
+    /// the final aggregated signature will need to be adapted with the discrete log
+    /// of `adaptor_point` before the signature can be considered valid. All signers
+    /// must agree on and use the same adaptor point for the final signature to be valid.
+    ///
+    /// See [`SecondRound::aggregated_nonce`] to access the aggregated nonce,
+    /// and [`SecondRound::our_signature`] to access the partial signature.
+    ///
+    /// This method intentionally consumes the `FirstRound`, to avoid accidentally
+    /// reusing a secret-nonce.
+    ///
+    /// This method should only be invoked once [`is_complete`][Self::is_complete]
+    /// returns true, otherwise it will fail. Can also return an error if partial
+    /// signing fails, probably because the wrong secret key was given.
+    ///
+    /// For all partial signatures to be valid, everyone must naturally be signing the
+    /// same message.
+    pub fn finalize_adaptor<M>(
+        self,
+        seckey: impl Into<Scalar>,
+        adaptor_point: impl Into<MaybePoint>,
+        message: M,
+    ) -> Result<SecondRound<M>, RoundFinalizeError>
+    where
+        M: AsRef<[u8]>,
+    {
+        let adaptor_point: MaybePoint = adaptor_point.into();
+        let pubnonces: Vec<PubNonce> = self.pubnonce_slots.finalize()?;
+        let aggnonce = pubnonces.iter().sum();
+
+        let partial_signature = crate::adaptor::sign_partial(
+            &self.key_agg_ctx,
+            seckey,
+            self.secnonce,
+            &aggnonce,
+            adaptor_point,
+            &message,
+        )?;
+
+        let mut partial_signature_slots = Slots::new(pubnonces.len());
+        partial_signature_slots
+            .place(partial_signature, self.signer_index)
+            .unwrap(); // never fails
+
+        let second_round = SecondRound {
+            key_agg_ctx: self.key_agg_ctx,
+            signer_index: self.signer_index,
+            pubnonces,
+            aggnonce,
+            adaptor_point,
+            message,
+            partial_signature_slots,
+        };
+
+        Ok(second_round)
+    }
+}
+
+pub fn xor_bytes<const SIZE: usize>(a: &[u8; SIZE], b: &[u8; SIZE]) -> [u8; SIZE] {
+    let mut out = [0; SIZE];
+    for i in 0..SIZE {
+        out[i] = a[i] ^ b[i]
+    }
+    out
+}
+
+pub type PartialSignature = Fr;
+
+pub struct SecondRound<M: AsRef<[u8]>> {
+    key_agg_ctx: KeyAggContext,
+    signer_index: usize,
+    pubnonces: Vec<PubNonce>,
+    aggnonce: AggNonce,
+    adaptor_point: MaybePoint,
+    message: M,
+    partial_signature_slots: Slots<PartialSignature>,
+}
+
+impl<M: AsRef<[u8]>> SecondRound<M> {
+    /// Returns the aggregated nonce built from the nonces provided in the first round.
+    /// Signers who find themselves in an aggregator role can distribute this aggregated
+    /// nonce to other signers to that they can produce an aggregated signature without
+    /// 1:1 communication between every pair of signers.
+    pub fn aggregated_nonce(&self) -> &AggNonce {
+        &self.aggnonce
+    }
+
+    /// Returns the partial signature created during finalization of the first round.
+    pub fn our_signature<T: From<PartialSignature>>(&self) -> T {
+        self.partial_signature_slots.slots[self.signer_index]
+            .map(T::from)
+            .unwrap() // never fails
+    }
+
+    /// Returns a slice of all signer indexes from whom we have yet to receive a
+    /// [`PartialSignature`]. Note that since our signature was constructed
+    /// at the end of the first round, this slice will never contain the signer
+    /// index provided to [`FirstRound::new`].
+    pub fn holdouts(&self) -> &[usize] {
+        self.partial_signature_slots.remaining()
+    }
+
+    /// Adds a [`PartialSignature`] to the internal state, registering it to a specific
+    /// signer at a given index. Returns an error if the signature is not valid, or if
+    /// the given signer index is out of range, or if we already have a different partial
+    /// signature on-file for that signer.
+    pub fn receive_signature(
+        &mut self,
+        signer_index: usize,
+        partial_signature: impl Into<PartialSignature>,
+    ) -> Result<(), RoundContributionError> {
+        let partial_signature: PartialSignature = partial_signature.into();
+        let signer_pubkey: Point = self.key_agg_ctx.get_pubkey(signer_index).ok_or_else(|| {
+            RoundContributionError::out_of_range(signer_index, self.key_agg_ctx.pubkeys().len())
+        })?;
+
+        musig2::adaptor::verify_partial(
+            &self.key_agg_ctx,
+            partial_signature,
+            &self.aggnonce,
+            self.adaptor_point,
+            signer_pubkey,
+            &self.pubnonces[signer_index],
+            &self.message,
+        )
+        .map_err(|_| RoundContributionError::invalid_signature(signer_index))?;
+
+        self.partial_signature_slots
+            .place(partial_signature, signer_index)?;
+
+        Ok(())
+    }
+
+    /// Returns true once we have all partial signatures from the group.
+    pub fn is_complete(&self) -> bool {
+        self.holdouts().len() == 0
+    }
+
+    /// Finishes the second round once all partial signatures are received,
+    /// combining signatures into an aggregated signature on the `message`
+    /// given to [`FirstRound::finalize`].
+    ///
+    /// This method should only be invoked once [`is_complete`][Self::is_complete]
+    /// returns true, otherwise it will fail. Can also return an error if partial
+    /// signature aggregation fails, but if [`receive_signature`][Self::receive_signature]
+    /// didn't complain, then finalizing will succeed with overwhelming probability.
+    ///
+    /// If the [`FirstRound`] was finalized with [`FirstRound::finalize_adaptor`], then
+    /// the second round must also be finalized with [`SecondRound::finalize_adaptor`],
+    /// otherwise this method will return [`RoundFinalizeError::InvalidAggregatedSignature`].
+    pub fn finalize<T>(self) -> Result<T, RoundFinalizeError>
+    where
+        T: From<LiftedSignature>,
+    {
+        let sig = self
+            .finalize_adaptor::<AdaptorSignature>()?
+            .adapt(MaybeScalar::Zero)
+            .expect("finalizing with empty adaptor should never result in an adaptor failure");
+
+        Ok(T::from(sig))
+    }
+
+    /// Finishes the second round once all partial adaptor signatures are received,
+    /// combining signatures into an aggregated adaptor signature on the `message`
+    /// given to [`FirstRound::finalize`].
+    ///
+    /// To make this signature valid, it must then be adapted with the discrete log
+    /// of the adaptor point given to [`FirstRound::finalize`].
+    ///
+    /// This method should only be invoked once [`is_complete`][Self::is_complete]
+    /// returns true, otherwise it will fail. Can also return an error if partial
+    /// signature aggregation fails, but if [`receive_signature`][Self::receive_signature]
+    /// didn't complain, then finalizing will succeed with overwhelming probability.
+    ///
+    /// If this signing session did not use adaptor signatures, the signature returned by
+    /// this method will be a valid signature which can be adapted with `MaybeScalar::Zero`.
+    pub fn finalize_adaptor<T>(self) -> Result<AdaptorSignature, RoundFinalizeError> {
+        let partial_signatures: Vec<PartialSignature> = self.partial_signature_slots.finalize()?;
+        let final_signature = musig2::adaptor::aggregate_partial_signatures(
+            &self.key_agg_ctx,
+            &self.aggnonce,
+            self.adaptor_point,
+            partial_signatures,
+            &self.message,
+        )?;
+        Ok(final_signature)
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Hash, Ord, PartialOrd)]
+pub struct AggNonce {
+    #[allow(missing_docs)]
+    pub R1: MaybePoint,
+    #[allow(missing_docs)]
+    pub R2: MaybePoint,
+}
+
+impl AggNonce {
+    /// Construct a new `AggNonce` from the given pair of public nonce points.
+    pub fn new<T: Into<MaybePoint>>(R1: T, R2: T) -> AggNonce {
+        AggNonce {
+            R1: R1.into(),
+            R2: R2.into(),
+        }
+    }
+
+    /// Aggregates many partial public nonces together into an aggregated nonce.
+    ///
+    /// ```
+    /// use musig2::{AggNonce, PubNonce};
+    ///
+    /// let nonces: [PubNonce; 2] = [
+    ///     "0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798\
+    ///      032DE2662628C90B03F5E720284EB52FF7D71F4284F627B68A853D78C78E1FFE93"
+    ///         .parse()
+    ///         .unwrap(),
+    ///     "028465FCF0BBDBCF443AABCCE533D42B4B5A10966AC09A49655E8C42DAAB8FCD61\
+    ///      037496A3CC86926D452CAFCFD55D25972CA1675D549310DE296BFF42F72EEEA8C9"
+    ///         .parse()
+    ///         .unwrap(),
+    /// ];
+    ///
+    /// let expected =
+    ///     "02aebee092fe428c3b4c53993c3f80eecbf88ca935469b5bfcaabecb7b2afbb1a6\
+    ///      03c923248ac1f639368bc82345698dfb445dca6024b9ba5a9bafe971bb5813964b"
+    ///         .parse::<AggNonce>()
+    ///         .unwrap();
+    ///
+    /// assert_eq!(musig2::AggNonce::sum(&nonces), expected);
+    /// assert_eq!(musig2::AggNonce::sum(nonces), expected);
+    /// ```
+    pub fn sum<T, I>(nonces: I) -> AggNonce
+    where
+        T: std::borrow::Borrow<PubNonce>,
+        I: IntoIterator<Item = T>,
+    {
+        let (r1s, r2s): (Vec<Point>, Vec<Point>) = nonces
+            .into_iter()
+            .map(|pubnonce| (pubnonce.borrow().R1, pubnonce.borrow().R2))
+            .unzip();
+
+        AggNonce {
+            R1: Point::sum(r1s),
+            R2: Point::sum(r2s),
+        }
+    }
+
+    /// Computes the nonce coefficient `b`, used to create the final nonce and signatures.
+    ///
+    /// Most use-cases will not need to invoke this method. Instead use
+    /// [`sign_solo`][crate::sign_solo] or [`sign_partial`][crate::sign_partial]
+    /// to create signatures.
+    pub fn nonce_coefficient<S>(
+        &self,
+        aggregated_pubkey: impl Into<Point>,
+        message: impl AsRef<[u8]>,
+    ) -> S
+    where
+        S: From<MaybeScalar>,
+    {
+        let hash: [u8; 32] = tagged_hashes::MUSIG_NONCECOEF_TAG_HASHER
+            .clone()
+            .chain_update(&self.R1.serialize())
+            .chain_update(&self.R2.serialize())
+            .chain_update(&aggregated_pubkey.into().serialize_xonly())
+            .chain_update(message.as_ref())
+            .finalize()
+            .into();
+
+        S::from(MaybeScalar::reduce_from(&hash))
+    }
+
+    /// Computes the final public nonce point, published with the aggregated signature.
+    /// If this point winds up at infinity (probably due to a mischevious signer), we
+    /// instead return the generator point `G`.
+    ///
+    /// Most use-cases will not need to invoke this method. Instead use
+    /// [`sign_solo`][crate::sign_solo] or [`sign_partial`][crate::sign_partial]
+    /// to create signatures.
+    pub fn final_nonce<P>(&self, nonce_coeff: impl Into<MaybeScalar>) -> P
+    where
+        P: From<Point>,
+    {
+        let nonce_coeff: MaybeScalar = nonce_coeff.into();
+        let aggnonce_sum = self.R1 + (nonce_coeff * self.R2);
+        P::from(match aggnonce_sum {
+            MaybePoint::Infinity => Point::generator(),
+            MaybePoint::Valid(p) => p,
+        })
+    }
+}
+
+mod encodings {
+    use super::*;
+
+    impl BinaryEncoding for SecNonce {
+        type Serialized = [u8; 64];
+
+        /// Returns the binary serialization of `SecNonce`, which serializes
+        /// both inner scalar values into a fixed-length 64-byte array.
+        ///
+        /// Note that this serialization differs from the format suggested
+        /// in BIP327, in that we do not include a public key.
+        fn to_bytes(&self) -> Self::Serialized {
+            let mut serialized = [0u8; 64];
+            serialized[..32].clone_from_slice(&self.k1.serialize());
+            serialized[32..].clone_from_slice(&self.k2.serialize());
+            serialized
+        }
+
+        /// Parses a `SecNonce` from a serialized byte slice.
+        /// This byte slice should be 64 bytes long, and encode two
+        /// non-zero 256-bit scalars.
+        ///
+        /// We also accept 97-byte long slices, to be compatible with BIP327's
+        /// suggested serialization format of `SecNonce`.
+        fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError<Self>> {
+            if bytes.len() != 64 && bytes.len() != 97 {
+                return Err(DecodeError::bad_length(bytes.len()));
+            }
+            let k1 = Scalar::from_slice(&bytes[..32])?;
+            let k2 = Scalar::from_slice(&bytes[32..64])?;
+            Ok(SecNonce { k1, k2 })
+        }
+    }
+
+    impl BinaryEncoding for PubNonce {
+        type Serialized = [u8; 66];
+
+        /// Returns the binary serialization of `PubNonce`, which serializes
+        /// both inner points into a fixed-length 66-byte array.
+        fn to_bytes(&self) -> Self::Serialized {
+            let mut bytes = [0u8; 66];
+            bytes[..33].clone_from_slice(&self.R1.serialize());
+            bytes[33..].clone_from_slice(&self.R2.serialize());
+            bytes
+        }
+
+        /// Parses a `PubNonce` from a serialized byte slice. This byte slice should
+        /// be 66 bytes long, and encode two compressed, non-infinity curve points.
+        fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError<Self>> {
+            if bytes.len() != 66 {
+                return Err(DecodeError::bad_length(bytes.len()));
+            }
+            let R1 = Point::from_slice(&bytes[..33])?;
+            let R2 = Point::from_slice(&bytes[33..])?;
+            Ok(PubNonce { R1, R2 })
+        }
+    }
+
+    impl BinaryEncoding for AggNonce {
+        type Serialized = [u8; 66];
+
+        /// Returns the binary serialization of `AggNonce`, which serializes
+        /// both inner points into a fixed-length 66-byte array.
+        fn to_bytes(&self) -> Self::Serialized {
+            let mut serialized = [0u8; 66];
+            serialized[..33].clone_from_slice(&self.R1.serialize());
+            serialized[33..].clone_from_slice(&self.R2.serialize());
+            serialized
+        }
+
+        /// Parses an `AggNonce` from a serialized byte slice. This byte slice should
+        /// be 66 bytes long, and encode two compressed (possibly infinity) curve points.
+        fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError<Self>> {
+            if bytes.len() != 66 {
+                return Err(DecodeError::bad_length(bytes.len()));
+            }
+            let R1 = MaybePoint::from_slice(&bytes[..33])?;
+            let R2 = MaybePoint::from_slice(&bytes[33..])?;
+            Ok(AggNonce { R1, R2 })
+        }
+    }
+
+    impl_encoding_traits!(SecNonce, 64, 97);
+    impl_encoding_traits!(PubNonce, 66);
+    impl_encoding_traits!(AggNonce, 66);
+
+    // Do not implement Display for SecNonce.
+    impl_hex_display!(PubNonce);
+    impl_hex_display!(AggNonce);
+}
+
+impl<P> std::iter::Sum<P> for AggNonce
+where
+    P: std::borrow::Borrow<PubNonce>,
+{
+    /// Implements summation of partial public nonces into an aggregated nonce.
+    ///
+    /// ```
+    /// use musig2::{AggNonce, PubNonce};
+    ///
+    /// let nonces = [
+    ///     "0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798\
+    ///      032DE2662628C90B03F5E720284EB52FF7D71F4284F627B68A853D78C78E1FFE93"
+    ///         .parse::<PubNonce>()
+    ///         .unwrap(),
+    ///     "028465FCF0BBDBCF443AABCCE533D42B4B5A10966AC09A49655E8C42DAAB8FCD61\
+    ///      037496A3CC86926D452CAFCFD55D25972CA1675D549310DE296BFF42F72EEEA8C9"
+    ///         .parse::<PubNonce>()
+    ///         .unwrap(),
+    /// ];
+    ///
+    /// let expected =
+    ///     "02aebee092fe428c3b4c53993c3f80eecbf88ca935469b5bfcaabecb7b2afbb1a6\
+    ///      03c923248ac1f639368bc82345698dfb445dca6024b9ba5a9bafe971bb5813964b"
+    ///         .parse::<AggNonce>()
+    ///         .unwrap();
+    ///
+    /// assert_eq!(nonces.iter().sum::<AggNonce>(), expected);
+    /// assert_eq!(nonces.into_iter().sum::<AggNonce>(), expected);
+    /// ```
+    fn sum<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = P>,
+    {
+        let refs = iter.collect::<Vec<P>>();
+        AggNonce::sum(refs.iter().map(|nonce| nonce.borrow()))
     }
 }
