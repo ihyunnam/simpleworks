@@ -1,4 +1,5 @@
 use std::ops::Neg;
+use ark_bls12_377::FrParameters;
 // use subtle::ConstantTimeEq as _;
 use ark_serialize::CanonicalSerialize;
 // use serde::Serialize;
@@ -14,9 +15,7 @@ use sha2::Digest as _;
 use ark_crypto_primitives::{Error, SignatureScheme};
 use ark_ec::{twisted_edwards_extended::GroupAffine, AffineCurve, ProjectiveCurve};
 use ark_ff::{
-    bytes::ToBytes,
-    fields::{Field, PrimeField},
-    to_bytes, ToConstraintField, UniformRand,
+    bytes::ToBytes, fields::{Field, PrimeField}, to_bytes, Fp256, FpParameters, ToConstraintField, UniformRand
 };
 use ark_std::io::{Result as IoResult, Write};
 use ark_std::rand::Rng;
@@ -380,8 +379,8 @@ impl SecNonce {
 
     pub fn public_nonce(&self) -> PubNonce {
         PubNonce {
-            R1: self.k1.secret_key * G1Projective::prime_subgroup_generator(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-381.
-            R2: self.k2.secret_key * G1Projective::prime_subgroup_generator(),
+            R1: self.k1.secret_key * EdwardsProjective::prime_subgroup_generator().into(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-381.
+            R2: self.k2.secret_key * EdwardsProjective::prime_subgroup_generator().into(),
         }
     }
 }
@@ -1256,9 +1255,11 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     // POINTS HAVE 2 REPRESENTATIONS FOR POSITIVE AND NEGATIVE Y-COORDINATES STILL APPLY
     // AND THE POINT OF NEGATING IS FOR CONSISTENCY IN GENERATED SIGNATURES ACROSS SIGNERS
     let secnonce_sum = secnonce.k1 + b * secnonce.k2;
-    if final_nonce. {       // TODO: where is is_even, is_odd?
-        secnonce_sum.secret_key.neg();
-    }
+
+    // NOTE: I'M TAKING OUT THE PARITY CONSISTENCY CHECK BECAUSE WE ONLY HAVE LOG & USER BUT BRING IT BACK IN IF TROUBLE LATER
+    // if final_nonce. {       // TODO: where is is_even, is_odd?
+    //     secnonce_sum.secret_key.neg();
+    // }
 
     // s = k + e*a*d
     let partial_signature = secnonce_sum + (e * key_coeff * d);
@@ -1346,14 +1347,14 @@ pub fn verify_partial_adaptor(
     let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message);
 
     // s * G == R + (g * gacc * e * a * P)
-    let challenge_parity = aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc;
+    // let challenge_parity = aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc;
     let challenge_point = e * effective_pubkey;
-    if challenge_parity {
-        challenge_point.neg();
-    }
+    // if challenge_parity {
+    //     challenge_point.neg();
+    // }
 
     // TODO: double check G1 or G2
-    if partial_signature * G1Projective::prime_subgroup_generator() != effective_nonce + challenge_point {
+    if partial_signature * EdwardsProjective::prime_subgroup_generator().into() != effective_nonce + challenge_point {
         return Err(VerifyError::BadSignature);
     }
 
