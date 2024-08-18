@@ -43,7 +43,6 @@ pub type SimpleSchnorrSignatureVar = SignatureVar<EdwardsProjective, EdwardsVar>
 
 pub type SimpleSchnorr = Schnorr<EdwardsProjective>;
 
-pub type Point = [u8;32];   // GroupAffine<EdwardsProjective> serialized
 
 pub trait AggregateSignatureScheme {
     type Parameters: Clone + Send + Sync;

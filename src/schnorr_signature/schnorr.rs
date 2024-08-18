@@ -1,3 +1,4 @@
+use ark_serialize::CanonicalSerialize;
 use serde::Serialize;
 use ark_ed_on_bls12_381::{EdwardsProjective, EdwardsParameters};
 
@@ -19,8 +20,10 @@ use ark_std::rand::Rng;
 use ark_std::{hash::Hash, marker::PhantomData, vec::Vec};
 use blake2::Blake2s;
 use digest::Digest;
-use crate::schnorr_signature::{AggregateSignatureScheme, Point};
-use musig2::{errors::KeyAggError, tagged_hashes::{KEYAGG_LIST_TAG_HASHER, KEYAGG_COEFF_TAG_HASHER}};
+use crate::schnorr_signature::{AggregateSignatureScheme};
+use musig2::{
+    errors::KeyAggError, tagged_hashes::{KEYAGG_COEFF_TAG_HASHER, KEYAGG_LIST_TAG_HASHER, MUSIG_AUX_TAG_HASHER, MUSIG_NONCE_TAG_HASHER}, xor_bytes, NonceSeed
+};
 
 use derivative::Derivative;
 
@@ -36,6 +39,9 @@ pub struct Parameters<C: ProjectiveCurve> {
 }
 
 pub type PublicKey<C> = <C as ProjectiveCurve>::Affine;
+
+/* ADDED BY ME FOR MUSIG2. */
+pub type Point = PublicKey::<C>;
 
 #[derive(Clone, Default, Debug)]
 pub struct SecretKey<C: ProjectiveCurve> {
@@ -212,7 +218,8 @@ impl<ConstraintF: Field, C: ProjectiveCurve + ToConstraintField<ConstraintF>>
     }
 }
 
-/* MUSIG2 IMPLEMENTATION BY IHYUN. */
+/* MUSIG2 IMPLEMENTED BY IHYUN. SOURCE: https://github.com/conduition/musig2.git. 
+    HARDCODED FOR BLS12-381. */
 
 impl<C: ProjectiveCurve + Hash> AggregateSignatureScheme for Schnorr<C>
 where
@@ -350,9 +357,6 @@ where
     
 }
 
-/* MUSIG2 IMPLEMENTED BY IHYUN. SOURCE: https://github.com/conduition/musig2.git. 
-    HARDCODED FOR BLS12-381. */
-
 fn compute_key_aggregation_coefficient(
     pk_list_hash: &[u8; 32],
     pubkey: &Point,
@@ -408,6 +412,10 @@ pub struct KeyAggContext {
 }
 
 impl KeyAggContext {
+    pub fn aggregated_pubkey<T: From<Point>>(&self) -> T {
+        T::from(self.pubkey)
+    }
+
     pub fn new(ordered_pubkeys: Vec<Point>) -> Result<Self, KeyAggError>
     where
         // I: IntoIterator<Item = P>,
@@ -464,6 +472,341 @@ impl KeyAggContext {
             effective_pubkeys,
             parity_acc: subtle::Choice::from(0),
             tweak_acc: MaybeScalar::Zero,
+        })
+    }
+}
+
+pub struct SecNonce {
+    pub(crate) k1: SecretKey<C>,
+    pub(crate) k2: SecretKey<C>,
+}
+
+impl SecNonce {
+    /// Construct a new `SecNonce` from the given individual nonce values.
+    pub fn new<T: Into<Scalar>>(k1: T, k2: T) -> SecNonce {
+        SecNonce {
+            k1: k1.into(),
+            k2: k2.into(),
+        }
+    }
+
+    /// Constructs a new [`SecNonceBuilder`] from the given random nonce seed.
+    ///
+    /// See [`SecNonceBuilder::new`].
+    pub fn build<'snb>(nonce_seed: impl Into<NonceSeed>) -> SecNonceBuilder<'snb> {
+        SecNonceBuilder::new(nonce_seed)
+    }
+}
+
+pub struct SecNonceBuilder<'snb> {
+    nonce_seed_bytes: [u8; 32],
+    seckey: Option<SecretKey<C>>,
+    pubkey: Option<Point>,
+    aggregated_pubkey: Option<Point>,
+    message: Option<&'snb [u8]>,
+    extra_inputs: Vec<&'snb dyn AsRef<[u8]>>,
+}
+
+impl<'snb> SecNonceBuilder<'snb> {
+    /// Start building a nonce, seeded with the given random data
+    /// source `nonce_seed`, which should either be
+    ///
+    /// - 32 bytes drawn from a cryptographically secure RNG, OR
+    /// - a mutable reference to a secure RNG.
+    ///
+    /// ```
+    /// use rand::RngCore as _;
+    ///
+    /// # #[cfg(feature = "rand")]
+    /// // Sample the seed automatically
+    /// let secnonce = musig2::SecNonceBuilder::new(&mut rand::rngs::OsRng)
+    ///     .with_message(b"hello world!")
+    ///     .build();
+    ///
+    /// // Sample the seed manually
+    /// let mut nonce_seed = [0u8; 32];
+    /// rand::rngs::OsRng.fill_bytes(&mut nonce_seed);
+    /// let secnonce = musig2::SecNonceBuilder::new(nonce_seed)
+    ///     .with_message(b"hello world!")
+    ///     .build();
+    /// ```
+    ///
+    /// # WARNING
+    ///
+    /// It is critical for the `nonce_seed` to be **sampled randomly,** and NOT
+    /// constructed deterministically based on signing session data. Otherwise,
+    /// the signer can be [tricked into reusing the same nonce for concurrent
+    /// signing sessions, thus exposing their secret key.](
+    #[doc = "https://medium.com/blockstream/musig-dn-schnorr-multisignatures\
+             -with-verifiably-deterministic-nonces-27424b5df9d6#e3b6)"]
+    pub fn new(nonce_seed: impl Into<NonceSeed>) -> SecNonceBuilder<'snb> {
+        let NonceSeed(nonce_seed_bytes) = nonce_seed.into();
+        SecNonceBuilder {
+            nonce_seed_bytes,
+            seckey: None,
+            pubkey: None,
+            aggregated_pubkey: None,
+            message: None,
+            extra_inputs: Vec::new(),
+        }
+    }
+
+    /// Salt the resulting nonce with the public key expected to be used
+    /// during the signing phase.
+    ///
+    /// The public key will be overwritten if [`SecNonceBuilder::with_seckey`]
+    /// is used after this method.
+    pub fn with_pubkey(self, pubkey: impl Into<Point>) -> SecNonceBuilder<'snb> {
+        SecNonceBuilder {
+            pubkey: Some(pubkey.into()),
+            ..self
+        }
+    }
+
+    /// Salt the resulting nonce with the secret key which the nonce should be
+    /// used to protect during the signing phase.
+    ///
+    /// Overwrites any public key previously added by
+    /// [`SecNonceBuilder::with_pubkey`], as we compute the public key
+    /// of the given secret key and add it to the builder.
+    pub fn with_seckey(self, seckey: impl Into<Scalar>) -> SecNonceBuilder<'snb> {
+        let seckey: Scalar = seckey.into();
+        SecNonceBuilder {
+            seckey: Some(seckey),
+            pubkey: Some(seckey * G),
+            ..self
+        }
+    }
+
+    /// Salt the resulting nonce with the message which we expect to be signing with
+    /// the nonce.
+    pub fn with_message<M: AsRef<[u8]>>(self, msg: &'snb M) -> SecNonceBuilder<'snb> {
+        SecNonceBuilder {
+            message: Some(msg.as_ref()),
+            ..self
+        }
+    }
+
+    /// Salt the resulting nonce with the aggregated public key which we expect to aggregate
+    /// signatures for.
+    pub fn with_aggregated_pubkey(
+        self,
+        aggregated_pubkey: impl Into<Point>,
+    ) -> SecNonceBuilder<'snb> {
+        SecNonceBuilder {
+            aggregated_pubkey: Some(aggregated_pubkey.into()),
+            ..self
+        }
+    }
+
+    /// Salt the resulting nonce with arbitrary extra input bytes. This might be context-specific
+    /// data like a signing session ID, the name of the protocol, the current timestamp, whatever
+    /// you want, really.
+    ///
+    /// This method is additive; it does not overwrite the `extra_input` values added by previous
+    /// invocations of itself. This allows the caller to salt the nonce with an arbitrary amount
+    /// of extra entropy as desired, up to a limit of [`u32::MAX`] bytes (about 4GB). This method
+    /// will panic if the sum of all extra inputs attached to the builder would exceed that limit.
+    ///
+    /// ```
+    /// # let nonce_seed = [0xABu8; 32];
+    /// let remote_ip = [127u8, 0, 0, 1];
+    ///
+    /// let secnonce = musig2::SecNonceBuilder::new(nonce_seed)
+    ///     .with_extra_input(b"MyApp")
+    ///     .with_extra_input(&remote_ip)
+    ///     .with_extra_input(&String::from("What's up buttercup?"))
+    ///     .build();
+    /// ```
+    pub fn with_extra_input<E: AsRef<[u8]>>(
+        mut self,
+        extra_input: &'snb E,
+    ) -> SecNonceBuilder<'snb> {
+        self.extra_inputs.push(extra_input);
+        extra_input_length_check(&self.extra_inputs);
+        self
+    }
+
+    /// Sprinkles in a set of [`SecNonceSpices`] to this nonce builder. Extra inputs in
+    /// `spices` are appended to the builder (see [`SecNonceBuilder::with_extra_input`]).
+    /// All other parameters will be merged with those in `spices`, preferring parameters
+    /// in `spices` if they are present.
+    pub fn with_spices(mut self, spices: SecNonceSpices<'snb>) -> SecNonceBuilder<'snb> {
+        self.seckey = spices.seckey.or(self.seckey);
+        self.message = spices.message.map(|msg| msg.as_ref()).or(self.message);
+
+        let mut new_extra_inputs = spices.extra_inputs;
+        self.extra_inputs.append(&mut new_extra_inputs);
+        extra_input_length_check(&self.extra_inputs);
+
+        self
+    }
+
+    /// Build the secret nonce by hashing all of the builder's inputs into two
+    /// byte arrays, and reducing those byte arrays modulo the curve order into
+    /// two scalars `k1` and `k2`. These form the `SecNonce` as the tuple `(k1, k2)`.
+    ///
+    /// If the reduction results in an output of zero for either scalar,
+    /// we use a nonce of 1 instead for that scalar.
+    ///
+    /// This method matches the standard nonce generation algorithm specified in
+    /// [BIP327](https://github.com/bitcoin/bips/blob/master/bip-0327.mediawiki),
+    /// except in the extremely unlikely case of a hash reducing to zero.
+    pub fn build(self) -> SecNonce {
+        let seckey_bytes = match self.seckey {
+            Some(seckey) => {
+                let mut bytes = [0u8; 32];
+                seckey.secret_key.serialize(&mut bytes[..]);
+                bytes
+            },
+            None => [0u8; 32],
+        };
+
+        let nonce_seed_hash: [u8; 32] = MUSIG_AUX_TAG_HASHER
+            .clone()
+            .chain_update(&self.nonce_seed_bytes)
+            .finalize()
+            .into();
+
+        let mut hasher = MUSIG_NONCE_TAG_HASHER
+            .clone()
+            .chain_update(&xor_bytes(&seckey_bytes, &nonce_seed_hash));
+
+        // BIP327 doesn't allow the public key to be an optional argument,
+        // but there is no hard reason for that other than 'the RNG might fail'.
+        // For ergonomics we allow the pubkey to be omitted here in the same
+        // fashion as the aggregated pubkey.
+        match self.pubkey {
+            None => hasher.update(&[0]),
+            Some(pubkey) => {
+                hasher.update(&[33]); // individual pubkey len
+                let mut bytes = [0u8; 32];
+                pubkey.serialize(&mut bytes[..]);
+                hasher.update(&bytes);
+            }
+        }
+
+        match self.aggregated_pubkey {
+            None => hasher.update(&[0]),
+            Some(aggregated_pubkey) => {
+                hasher.update(&[32]); // aggregated pubkey len
+                // hasher.update(&aggregated_pubkey.serialize_xonly()); // THIS SERIALIZES ONLY THE X COORDINATE OF PUBKEY (AFFINE)
+                let mut bytes = [0u8; 32];
+                aggregated_pubkey.x.serialize(&mut bytes[..]);
+                hasher.update(&bytes);
+            }
+        };
+
+        match self.message {
+            None => hasher.update(&[0]),
+            Some(message) => {
+                hasher.update(&[1]);
+                hasher.update(&(message.len() as u64).to_be_bytes());
+                hasher.update(message);
+            }
+        };
+
+        // We still write the extra input length if the caller provided empty extra info.
+        if self.extra_inputs.len() > 0 {
+            let extra_input_total_len: usize = self
+                .extra_inputs
+                .iter()
+                .map(|extra_in| extra_in.as_ref().len())
+                .sum();
+
+            hasher.update(&(extra_input_total_len as u32).to_be_bytes());
+            for extra_input in self.extra_inputs {
+                hasher.update(extra_input.as_ref());
+            }
+        }
+
+        // Cloning the hash engine state reduces the computations needed.
+        let hash1 = <[u8; 32]>::from(hasher.clone().chain_update(&[0]).finalize());
+        let hash2 = <[u8; 32]>::from(hasher.clone().chain_update(&[1]).finalize());
+
+        let k1 = match MaybeScalar::reduce_from(&hash1) {
+            MaybeScalar::Zero => Scalar::one(),
+            MaybeScalar::Valid(k) => k,
+        };
+        let k2 = match MaybeScalar::reduce_from(&hash2) {
+            MaybeScalar::Zero => Scalar::one(),
+            MaybeScalar::Valid(k) => k,
+        };
+        SecNonce { k1, k2 }
+    }
+}
+
+struct Slots<T: Clone + Eq> {
+    slots: Vec<Option<T>>,
+    open_slots: Vec<usize>,
+}
+
+// #[derive(Debug, Eq, PartialEq, Clone, Hash, Ord, PartialOrd)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
+pub struct PubNonce {
+    pub R1: Point,
+    pub R2: Point,
+}
+
+/// A state machine which manages the first round of a MuSig2 signing session.
+///
+/// Its task is to collect [`PubNonce`]s one by one until all signers have provided
+/// one, at which point a partial signature can be created on a message using an
+/// internally cached [`SecNonce`].
+///
+/// By preventing cloning or copying, and by consuming itself after creating a
+/// partial signature, `FirstRound`'s API is written to encourage that a
+/// [`SecNonce`] should **never be reused.** Take care not to shoot yourself in
+/// the foot by attempting to work around this restriction.
+pub struct FirstRound {
+    key_agg_ctx: KeyAggContext,
+    signer_index: usize, // Our key's index in `key_agg_ctx`
+    secnonce: SecNonce,  // Our secret nonce.
+    pubnonce_slots: Slots<PubNonce>,
+}
+
+impl FirstRound {
+    /// Start the first round of a MuSig2 signing session.
+    ///
+    /// Generates the nonce using the given random seed value, which can
+    /// be any type that converts to `NonceSeed`. Usually this would
+    /// either be a `[u8; 32]` or any type that implements [`rand::RngCore`]
+    /// and [`rand::CryptoRng`], such as [`rand::rngs::OsRng`].
+    /// If a static byte array is used as the seed, it should be generated
+    /// using a cryptographically secure RNG and discarded after the `FirstRound`
+    /// is created. Prefer using a [`rand::CryptoRng`] if possible, so that
+    /// there is no possibility of reusing the same nonce seed in a new signing
+    /// session.
+    ///
+    /// Returns an error if the given signer index is out of range.
+    pub fn new(
+        key_agg_ctx: KeyAggContext,
+        nonce_seed: impl Into<NonceSeed>,
+        signer_index: usize,
+        // spices: SecNonceSpices<'_>,
+    ) -> Result<FirstRound, SignerIndexError> {
+        let signer_pubkey: Point = key_agg_ctx
+            .ordered_pubkeys[signer_index];
+            // .ok_or_else(|| SignerIndexError::new(signer_index, key_agg_ctx.ordered_pubkeys.len()))?;
+        let aggregated_pubkey: Point = key_agg_ctx.aggregated_pubkey();
+
+        let secnonce = SecNonce::build(nonce_seed)
+            .with_pubkey(signer_pubkey)
+            .with_aggregated_pubkey(aggregated_pubkey)
+            .with_extra_input(&(signer_index as u32).to_be_bytes())
+            // .with_spices(spices)
+            .build();
+
+        let pubnonce = secnonce.public_nonce();
+
+        let mut pubnonce_slots = Slots::new(key_agg_ctx.pubkeys().len());
+        pubnonce_slots.place(pubnonce, signer_index).unwrap(); // never fails
+
+        Ok(FirstRound {
+            key_agg_ctx,
+            secnonce,
+            signer_index,
+            pubnonce_slots,
         })
     }
 }
