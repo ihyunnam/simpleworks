@@ -1,8 +1,10 @@
+use std::ops::Neg;
 // use subtle::ConstantTimeEq as _;
 use ark_serialize::CanonicalSerialize;
 // use serde::Serialize;
 use ark_ed_on_bls12_381::{EdwardsProjective, EdwardsParameters};
 use ark_bls12_381::G1Projective;
+use subtle::Choice;
 
 // type C = EdwardsProjective;
 // type P = EdwardsParameters;
@@ -33,7 +35,6 @@ use derivative::Derivative;
 // MaybePoint - point on bls12_381 (Affine, like PublicKey?)
 // MaybeScalar - scalarfield element of bls12_381 (basically PrivateKey)
 
-
 type MaybePoint = <EdwardsProjective as ProjectiveCurve>::Affine;
 type MaybeScalar = <EdwardsProjective as ProjectiveCurve>::ScalarField; // TODO: same thing as Fr!!!!
 
@@ -53,7 +54,7 @@ pub struct Parameters<C: ProjectiveCurve> {
 pub type PublicKey<C> = <C as ProjectiveCurve>::Affine;
 
 /* ADDED BY ME FOR MUSIG2. */
-pub type Point = PublicKey<EdwardsProjective>;
+pub type Point = <EdwardsProjective as ProjectiveCurve>::Affine;
 
 #[derive(Clone, Default, Debug)]
 pub struct SecretKey<C: ProjectiveCurve> {
@@ -237,7 +238,7 @@ fn compute_key_aggregation_coefficient(
     pk_list_hash: &[u8; 32],
     pubkey: &Point,
     pk2: Option<&Point>,
-) -> Fr {
+) -> MaybeScalar {
     // if pk2.is_some_and(|pk2| pubkey == pk2) {
     //     return MaybeScalar::one();
     // }
@@ -253,7 +254,7 @@ fn compute_key_aggregation_coefficient(
         .finalize()
         .into();
 
-    Fr::from_le_bytes_mod_order(&hash.to_vec())
+    MaybeScalar::from_le_bytes_mod_order(&hash.to_vec())
 }
 
 fn hash_pubkeys<P: std::borrow::Borrow<Point>>(ordered_pubkeys: &[P]) -> [u8; 32] {
@@ -289,7 +290,7 @@ pub struct KeyAggContext {
     pub(crate) effective_pubkeys: Vec<GroupAffine<EdwardsParameters>>,
 
     pub(crate) parity_acc: subtle::Choice, // false means g=1, true means g=n-1
-    pub(crate) tweak_acc: Fr,     // None means zero.
+    pub(crate) tweak_acc: MaybeScalar,     // None means zero.
 }
 
 impl KeyAggContext {
@@ -316,14 +317,14 @@ impl KeyAggContext {
         // If all pubkeys are the same, `pk2` will be set to `None`, indicating
         // that every public key `X` should be tweaked with a coefficient `H_agg(L, X)`
         // to prevent collisions (See appendix B of the musig2 paper).
-        let pk2: Option<&[u8;32]> = ordered_pubkeys[1..]
+        let pk2 = ordered_pubkeys[1..]
             .into_iter()
             .find(|pubkey| pubkey != &&ordered_pubkeys[0]);
 
         let pk_list_hash = hash_pubkeys(&ordered_pubkeys);
 
         // NOTE: THIS DOESN'T CHECK FOR POINTS AT INFINITY. NOT READY FOR PRODUCTION.
-        let (effective_pubkeys, key_coefficients): (Vec<GroupAffine<EdwardsParameters>>, Vec<Fr>) =
+        let (effective_pubkeys, key_coefficients): (Vec<Point>, Vec<Fr>) =
             ordered_pubkeys
                 .iter()
                 .map(|&pubkey| {
@@ -579,7 +580,7 @@ impl<'snb> SecNonceBuilder<'snb> {
                 hasher.update(&[32]); // aggregated pubkey len
                 // hasher.update(&aggregated_pubkey.serialize_xonly()); // THIS SERIALIZES ONLY THE X COORDINATE OF PUBKEY (AFFINE)
                 let mut bytes = [0u8; 32];
-                aggregated_pubkey.x.serialize(&mut bytes[..]);
+                aggregated_pubkey.serialize(&mut bytes[..]);
                 hasher.update(&bytes);
             }
         };
@@ -611,15 +612,15 @@ impl<'snb> SecNonceBuilder<'snb> {
         let hash1 = <[u8; 32]>::from(hasher.clone().chain_update(&[0]).finalize());
         let hash2 = <[u8; 32]>::from(hasher.clone().chain_update(&[1]).finalize());
 
-        let k1: Fr = Fr::from_le_bytes_mod_order(&hash1);
-        let k1: Fr = if k1.is_zero() {
-            Fr::one()
+        let k1: MaybeScalar = MaybeScalar::from_le_bytes_mod_order(&hash1);
+        let k1: MaybeScalar = if k1.is_zero() {
+            MaybeScalar::one()
         } else {
             k1
         };
-        let k2: Fr = Fr::from_le_bytes_mod_order(&hash2);
-        let k2: Fr = if k2.is_zero() {
-            Fr::one()
+        let k2: MaybeScalar = MaybeScalar::from_le_bytes_mod_order(&hash2);
+        let k2: MaybeScalar = if k2.is_zero() {
+            MaybeScalar::one()
         } else {
             k2
         };
@@ -750,10 +751,10 @@ impl FirstRound {
         })
     }
 
-    // NOTE: WE ONLY PASS IN ON SECKEY (LOG AND USER INDIVIDUALLY) AND ORIGINALLY THIS IS INSIDE VEC ITERATOR SO IT WORKS FINE
+    // NOTE: WE ONLY PASS IN ONE SECKEY (LOG AND USER INDIVIDUALLY) AND ORIGINALLY THIS IS INSIDE VEC ITERATOR SO IT WORKS FINE
     pub fn finalize<M>(
         self,
-        seckey: impl Into<SecretKey<EdwardsProjective>>,
+        seckey: SecretKey<EdwardsProjective>,
         message: M,
     ) -> Result<SecondRound<M>, RoundFinalizeError>
     where
@@ -919,16 +920,16 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
     /// If the [`FirstRound`] was finalized with [`FirstRound::finalize_adaptor`], then
     /// the second round must also be finalized with [`SecondRound::finalize_adaptor`],
     /// otherwise this method will return [`RoundFinalizeError::InvalidAggregatedSignature`].
-    pub fn finalize<T>(self) -> Result<T, RoundFinalizeError>
-    where
-        T: From<LiftedSignature>,
+    pub fn finalize(self) -> Result<Signature<EdwardsProjective>, RoundFinalizeError>
+    // where
+    //     T: From<LiftedSignature>,
     {
         let sig = self
             .finalize_adaptor::<Signature<EdwardsProjective>>()?;
             // .adapt(MaybeScalar::Zero)    // WHAT THIS DOES: Adapts the signature into a lifted signature with a given adaptor secret.
             // .expect("finalizing with empty adaptor should never result in an adaptor failure");
 
-        Ok(T::from(sig))
+        Ok(sig)
     }
 
     /// Finishes the second round once all partial adaptor signatures are received,
@@ -945,7 +946,7 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
     ///
     /// If this signing session did not use adaptor signatures, the signature returned by
     /// this method will be a valid signature which can be adapted with `MaybeScalar::Zero`.
-    pub fn finalize_adaptor<T>(self) -> Result<Signature<EdwardsProjective>, RoundFinalizeError> {
+    pub fn finalize_adaptor(self) -> Result<Signature<EdwardsProjective>, RoundFinalizeError> {
         let partial_signatures: Vec<PartialSignature> = self.partial_signature_slots.finalize()?;   // FINALIZE UNRELATED TO ADAPTOR
         let final_signature = aggregate_partial_signatures(
             &self.key_agg_ctx,
@@ -957,7 +958,9 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Hash, Ord, PartialOrd)]
+// #[derive(Debug, Eq, PartialEq, Clone, Hash, Ord, PartialOrd)]
+// NOTE: Ord and PartialOrd are for comparisons. If needed, do manual coordinate-wise comparisons.
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct AggNonce {
     #[allow(missing_docs)]
     pub R1: MaybePoint,
@@ -1211,14 +1214,16 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
 ) -> Result<T, SigningError> {
     // let adaptor_point: MaybePoint = adaptor_point.into();
     // let seckey: Scalar = seckey.into(); // TODO: JUST EXTRACT THE SCALAR OUT OF SECKEY
+    let pubkey = seckey.public_key;
     let seckey = seckey.secret_key;
-    let pubkey = seckey.base_point_mul();
+    // let pubkey = seckey.base_point_mul();
 
+    // NOTE: TOOK OUT CORRECTNESS CHECK
     // As a side-effect, looking up the cached key coefficient also confirms
     // the individual key is indeed part of the aggregated key.
-    let key_coeff = key_agg_ctx
-        .key_coefficient(pubkey)
-        .ok_or(SigningError::UnknownKey)?;
+    // let key_coeff = key_agg_ctx
+    //     .key_coefficient(pubkey)
+    //     .ok_or(SigningError::UnknownKey)?;
 
     let aggregated_pubkey = key_agg_ctx.pubkey;
     let pubnonce = secnonce.public_nonce();
@@ -1227,20 +1232,33 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     let final_nonce: Point = aggregated_nonce.final_nonce(b);
     // let adapted_nonce = final_nonce + adaptor_point;
 
+    // TODO: DOES PARITY LOGIC STILL STAND FOR BLS12-381?
     // `d` is negated if only one of the parity accumulator OR the aggregated pubkey
     // has odd parity.
-    let d = seckey.negate_if(aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc);
-
+    // let d = seckey.negate_if(aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc);
+    let d = seckey;
+    if aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc {
+        d.neg();    
+    }
     // let nonce_x_bytes = adapted_nonce.serialize_xonly();
-    let nonce_x_bytes = final_nonce.serialize_xonly();
-    let e: MaybeScalar = compute_challenge_hash_tweak(&nonce_x_bytes, &aggregated_pubkey, &message);
+    let nonce_x_bytes = vec![];
+    final_nonce.serialize(nonce_x_bytes);
+    let mut array = [0u8; 32];
+    array.copy_from_slice(&nonce_x_bytes[..32]);
+    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message);
 
     // if has_even_Y(R):
     //   k = k1 + b*k2
     // else:
     //   k = (n-k1) + b(n-k2)
     //     = n - (k1 + b*k2)
-    let secnonce_sum = (secnonce.k1 + b * secnonce.k2).negate_if(final_nonce.parity());
+    // NOTE: I THINK USING Y-COORDINATE PARITY IS STILL FINE FOR BLS12-381 BECAUSE
+    // POINTS HAVE 2 REPRESENTATIONS FOR POSITIVE AND NEGATIVE Y-COORDINATES STILL APPLY
+    // AND THE POINT OF NEGATING IS FOR CONSISTENCY IN GENERATED SIGNATURES ACROSS SIGNERS
+    let secnonce_sum = secnonce.k1 + b * secnonce.k2;
+    if final_nonce. {       // TODO: where is is_even, is_odd?
+        secnonce_sum.secret_key.neg();
+    }
 
     // s = k + e*a*d
     let partial_signature = secnonce_sum + (e * key_coeff * d);
@@ -1266,10 +1284,13 @@ pub fn compute_challenge_hash_tweak<S: From<MaybeScalar>>(
     aggregated_pubkey: &Point,
     message: impl AsRef<[u8]>,
 ) -> S {
+    let agg_pubkey_serialized = vec![];
+    aggregated_pubkey.serialize(agg_pubkey_serialized);
+    // let agg_pubkey_copy = agg_pubkey_serialized.clone();
     let hash: [u8; 32] = BIP0340_CHALLENGE_TAG_HASHER
         .clone()
         .chain_update(final_nonce_xonly)
-        .chain_update(&aggregated_pubkey.serialize_xonly())
+        .chain_update(&agg_pubkey_serialized)
         .chain_update(message.as_ref())
         .finalize()
         .into();
@@ -1318,12 +1339,18 @@ pub fn verify_partial_adaptor(
         effective_nonce = -effective_nonce;
     }
 
-    let nonce_x_bytes = final_nonce.serialize_xonly();
-    let e: MaybeScalar = compute_challenge_hash_tweak(&nonce_x_bytes, &aggregated_pubkey, &message);
+    let nonce_x_bytes = vec![];
+    final_nonce.serialize(nonce_x_bytes);
+    let mut array = [0u8; 32];
+    array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
+    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message);
 
     // s * G == R + (g * gacc * e * a * P)
     let challenge_parity = aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc;
-    let challenge_point = (e * effective_pubkey).negate_if(challenge_parity);
+    let challenge_point = e * effective_pubkey;
+    if challenge_parity {
+        challenge_point.neg();
+    }
 
     // TODO: double check G1 or G2
     if partial_signature * G1Projective::prime_subgroup_generator() != effective_nonce + challenge_point {
@@ -1355,17 +1382,22 @@ pub fn aggregate_partial_adaptor_signatures<S: Into<Signature<EdwardsProjective>
     let final_nonce: Point = aggregated_nonce.final_nonce(b);
     // let adapted_nonce = final_nonce + adaptor_point;
     let nonce_x_bytes = vec![];
-    final_nonce.x.serialize(nonce_x_bytes);
+    final_nonce.serialize(nonce_x_bytes);
+    // NOTE: FOR BLS12-381, X COORDINATE DOESN'T UNIQUELY IDENTIFY THE POINT ON CURVE SO SERIALIZE ENTIRE AFFINE
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
     // let nonce_x_bytes = final_nonce.x.serialize();
     let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message);
 
+    let elem = e * key_agg_ctx.tweak_acc;
+    if aggregated_pubkey.parity() {
+        elem.neg();
+    }
     let aggregated_signature = partial_signatures
         .into_iter()
         .map(|sig| sig.into())
         .sum::<Signature<EdwardsProjective>>()
-        + (e * key_agg_ctx.tweak_acc).negate_if(aggregated_pubkey.parity());
+        + elem;
 
     // let effective_nonce = if final_nonce.has_even_y() {
     //     final_nonce
