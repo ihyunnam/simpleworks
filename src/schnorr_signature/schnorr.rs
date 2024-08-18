@@ -2,6 +2,7 @@
 use ark_serialize::CanonicalSerialize;
 // use serde::Serialize;
 use ark_ed_on_bls12_381::{EdwardsProjective, EdwardsParameters};
+use ark_bls12_381::G1Projective;
 
 // type C = EdwardsProjective;
 // type P = EdwardsParameters;
@@ -23,15 +24,20 @@ use blake2::Blake2s;
 use digest::Digest;
 // use crate::schnorr_signature::{AggregateSignatureScheme};
 use musig2::{
-    errors::{KeyAggError, RoundContributionError, RoundFinalizeError, SignerIndexError}, tagged_hashes::{KEYAGG_COEFF_TAG_HASHER, KEYAGG_LIST_TAG_HASHER, MUSIG_AUX_TAG_HASHER, MUSIG_NONCE_TAG_HASHER}, LiftedSignature, NonceSeed
+    errors::{KeyAggError, RoundContributionError, RoundFinalizeError, SignerIndexError, SigningError, VerifyError},
+    tagged_hashes::{BIP0340_CHALLENGE_TAG_HASHER, KEYAGG_COEFF_TAG_HASHER, KEYAGG_LIST_TAG_HASHER, MUSIG_AUX_TAG_HASHER, MUSIG_NONCECOEF_TAG_HASHER, MUSIG_NONCE_TAG_HASHER},
+    LiftedSignature, NonceSeed
 };
 
 use derivative::Derivative;
 
-type MaybePoint = <C as ProjectiveCurve>::Affine;
 // NOTE: 
 // MaybePoint - point on bls12_381 (Affine, like PublicKey?)
 // MaybeScalar - scalarfield element of bls12_381 (basically PrivateKey)
+
+
+type MaybePoint = <EdwardsProjective as ProjectiveCurve>::Affine;
+type MaybeScalar = <EdwardsProjective as ProjectiveCurve>::ScalarField; // TODO: same thing as Fr!!!!
 
 pub struct Schnorr<C: ProjectiveCurve> {
     _group: PhantomData<C>,
@@ -69,6 +75,7 @@ pub struct Signature<C: ProjectiveCurve> {
     pub prover_response: C::ScalarField,
     pub verifier_challenge: [u8; 32],
 }
+// TODO: musig2 and simpleworks signatures are totally different... 
 
 impl<C: ProjectiveCurve + Hash> SignatureScheme for Schnorr<C>
 where
@@ -375,8 +382,8 @@ impl SecNonce {
 
     pub fn public_nonce(&self) -> PubNonce {
         PubNonce {
-            R1: self.k1.secret_key * G,        // G IS GENERATOR POINT
-            R2: self.k2.secret_key * G,
+            R1: self.k1.secret_key * G1Projective::prime_subgroup_generator(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-381.
+            R2: self.k2.secret_key * G1Projective::prime_subgroup_generator(),
         }
     }
 }
@@ -665,6 +672,15 @@ impl<T: Clone + Eq> Slots<T> {
             .remove(self.open_slots.binary_search(&index).unwrap());
         Ok(())
     }
+
+    /// Returns the full array of slot values in order.
+    /// Returns `None` if any slot is not yet filled.
+    fn finalize(self) -> Result<Vec<T>, RoundFinalizeError> {
+        self.slots
+            .into_iter()
+            .map(|opt| opt.ok_or(RoundFinalizeError::Incomplete))
+            .collect()
+    }
 }
 
 // #[derive(Debug, Eq, PartialEq, Clone, Hash, Ord, PartialOrd)]
@@ -739,13 +755,13 @@ impl FirstRound {
 
     pub fn finalize<M>(
         self,
-        seckey: impl Into<Scalar>,
+        seckey: impl Into<SecretKey<EdwardsProjective>>,
         message: M,
     ) -> Result<SecondRound<M>, RoundFinalizeError>
     where
         M: AsRef<[u8]>,
     {
-        self.finalize_adaptor(seckey, MaybePoint::Infinity, message)
+        self.finalize_adaptor(seckey, message)
     }
 
     /// Finishes the first round once all nonces are received, combining nonces
@@ -772,23 +788,23 @@ impl FirstRound {
     /// same message.
     pub fn finalize_adaptor<M>(
         self,
-        seckey: impl Into<Scalar>,
-        adaptor_point: impl Into<MaybePoint>,
+        seckey: impl Into<SecretKey<EdwardsProjective>,
+        // adaptor_point: MaybePoint,
         message: M,
     ) -> Result<SecondRound<M>, RoundFinalizeError>
     where
         M: AsRef<[u8]>,
     {
-        let adaptor_point: MaybePoint = adaptor_point.into();
-        let pubnonces: Vec<PubNonce> = self.pubnonce_slots.finalize()?;
+        // let adaptor_point: MaybePoint = adaptor_point.into();
+        let pubnonces: Vec<PubNonce> = self.pubnonce_slots.finalize()?;     // TODO: IMPORT FINALIZE
         let aggnonce = pubnonces.iter().sum();
 
-        let partial_signature = crate::adaptor::sign_partial(
+        let partial_signature = sign_partial_adaptor(
             &self.key_agg_ctx,
             seckey,
             self.secnonce,
             &aggnonce,
-            adaptor_point,
+            // adaptor_point,
             &message,
         )?;
 
@@ -802,7 +818,7 @@ impl FirstRound {
             signer_index: self.signer_index,
             pubnonces,
             aggnonce,
-            adaptor_point,
+            // adaptor_point,
             message,
             partial_signature_slots,
         };
@@ -826,7 +842,7 @@ pub struct SecondRound<M: AsRef<[u8]>> {
     signer_index: usize,
     pubnonces: Vec<PubNonce>,
     aggnonce: AggNonce,
-    adaptor_point: MaybePoint,
+    // adaptor_point: MaybePoint,
     message: M,
     partial_signature_slots: Slots<PartialSignature>,
 }
@@ -929,12 +945,12 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
     ///
     /// If this signing session did not use adaptor signatures, the signature returned by
     /// this method will be a valid signature which can be adapted with `MaybeScalar::Zero`.
-    pub fn finalize_adaptor<T>(self) -> Result<AdaptorSignature, RoundFinalizeError> {
-        let partial_signatures: Vec<PartialSignature> = self.partial_signature_slots.finalize()?;
+    pub fn finalize_adaptor<T>(self) -> Result<Signature<EdwardsProjective>, RoundFinalizeError> {
+        let partial_signatures: Vec<PartialSignature> = self.partial_signature_slots.finalize()?;   // FINALIZE UNRELATED TO ADAPTOR
         let final_signature = musig2::adaptor::aggregate_partial_signatures(
             &self.key_agg_ctx,
             &self.aggnonce,
-            self.adaptor_point,
+            // self.adaptor_point,
             partial_signatures,
             &self.message,
         )?;
@@ -1013,7 +1029,7 @@ impl AggNonce {
     where
         S: From<MaybeScalar>,
     {
-        let hash: [u8; 32] = tagged_hashes::MUSIG_NONCECOEF_TAG_HASHER
+        let hash: [u8; 32] = MUSIG_NONCECOEF_TAG_HASHER
             .clone()
             .chain_update(&self.R1.serialize())
             .chain_update(&self.R2.serialize())
@@ -1022,7 +1038,7 @@ impl AggNonce {
             .finalize()
             .into();
 
-        S::from(MaybeScalar::reduce_from(&hash))
+        S::from(MaybeScalar::from_le_bytes_mod_order(&hash))
     }
 
     /// Computes the final public nonce point, published with the aggregated signature.
@@ -1172,4 +1188,184 @@ where
         let refs = iter.collect::<Vec<P>>();
         AggNonce::sum(refs.iter().map(|nonce| nonce.borrow()))
     }
+}
+
+pub fn sign_partial_adaptor<T: From<PartialSignature>>(
+    key_agg_ctx: &KeyAggContext,
+    seckey: SecretKey<EdwardsProjective>,
+    secnonce: SecNonce,
+    aggregated_nonce: &AggNonce,
+    // adaptor_point: impl Into<MaybePoint>,
+    message: impl AsRef<[u8]>,
+) -> Result<T, SigningError> {
+    // let adaptor_point: MaybePoint = adaptor_point.into();
+    // let seckey: Scalar = seckey.into(); // TODO: JUST EXTRACT THE SCALAR OUT OF SECKEY
+    let seckey = seckey.secret_key;
+    let pubkey = seckey.base_point_mul();
+
+    // As a side-effect, looking up the cached key coefficient also confirms
+    // the individual key is indeed part of the aggregated key.
+    let key_coeff = key_agg_ctx
+        .key_coefficient(pubkey)
+        .ok_or(SigningError::UnknownKey)?;
+
+    let aggregated_pubkey = key_agg_ctx.pubkey;
+    let pubnonce = secnonce.public_nonce();
+
+    let b: MaybeScalar = aggregated_nonce.nonce_coefficient(aggregated_pubkey, &message);
+    let final_nonce: Point = aggregated_nonce.final_nonce(b);
+    // let adapted_nonce = final_nonce + adaptor_point;
+
+    // `d` is negated if only one of the parity accumulator OR the aggregated pubkey
+    // has odd parity.
+    let d = seckey.negate_if(aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc);
+
+    // let nonce_x_bytes = adapted_nonce.serialize_xonly();
+    let nonce_x_bytes = final_nonce.serialize_xonly();
+    let e: MaybeScalar = compute_challenge_hash_tweak(&nonce_x_bytes, &aggregated_pubkey, &message);
+
+    // if has_even_Y(R):
+    //   k = k1 + b*k2
+    // else:
+    //   k = (n-k1) + b(n-k2)
+    //     = n - (k1 + b*k2)
+    let secnonce_sum = (secnonce.k1 + b * secnonce.k2).negate_if(final_nonce.parity());
+
+    // s = k + e*a*d
+    let partial_signature = secnonce_sum + (e * key_coeff * d);
+
+    verify_partial_adaptor(
+        key_agg_ctx,
+        partial_signature,
+        aggregated_nonce,
+        // adaptor_point,
+        pubkey,
+        &pubnonce,
+        &message,
+    )?;
+
+    Ok(T::from(partial_signature))
+}
+
+/// Computes the challenge hash `e` for for a signature. You probably don't need
+/// to call this directly. Instead use [`sign_solo`][crate::sign_solo] or
+/// [`sign_partial`][crate::sign_partial].
+pub fn compute_challenge_hash_tweak<S: From<MaybeScalar>>(
+    final_nonce_xonly: &[u8; 32],
+    aggregated_pubkey: &Point,
+    message: impl AsRef<[u8]>,
+) -> S {
+    let hash: [u8; 32] = BIP0340_CHALLENGE_TAG_HASHER
+        .clone()
+        .chain_update(final_nonce_xonly)
+        .chain_update(&aggregated_pubkey.serialize_xonly())
+        .chain_update(message.as_ref())
+        .finalize()
+        .into();
+
+    S::from(MaybeScalar::from_le_bytes_mod_order(&hash))
+}
+
+
+/// Verify a partial signature, usually from an untrusted co-signer,
+/// which has been encrypted under an adaptor point.
+///
+/// If `verify_partial_adaptor` succeeds for every signature in
+/// a signing session, the resulting aggregated signature is guaranteed
+/// to be valid once it is adapted with the discrete log (secret key)
+/// of `adaptor_point`.
+///
+/// Returns an error if the given public key doesn't belong to the
+/// `key_agg_ctx`, or if the signature is invalid.
+pub fn verify_partial_adaptor(
+    key_agg_ctx: &KeyAggContext,
+    partial_signature: impl Into<PartialSignature>,
+    aggregated_nonce: &AggNonce,
+    // adaptor_point: impl Into<MaybePoint>,
+    individual_pubkey: impl Into<Point>,
+    individual_pubnonce: &PubNonce,
+    message: impl AsRef<[u8]>,
+) -> Result<(), VerifyError> {
+    let partial_signature: MaybeScalar = partial_signature.into();
+
+    // As a side-effect, looking up the cached effective key also confirms
+    // the individual key is indeed part of the aggregated key.
+    let effective_pubkey: MaybePoint = key_agg_ctx
+        .effective_pubkey(individual_pubkey)
+        .ok_or(VerifyError::UnknownKey)?;
+
+    let aggregated_pubkey = key_agg_ctx.pubkey;
+
+    let b: MaybeScalar = aggregated_nonce.nonce_coefficient(aggregated_pubkey, &message);
+    let final_nonce: Point = aggregated_nonce.final_nonce(b);
+    // let adapted_nonce = final_nonce + adaptor_point.into();
+
+    let mut effective_nonce = individual_pubnonce.R1 + b * individual_pubnonce.R2;
+
+    // Don't need constant time ops here as adapted_nonce is public.
+    if final_nonce.has_odd_y() {
+        effective_nonce = -effective_nonce;
+    }
+
+    let nonce_x_bytes = final_nonce.serialize_xonly();
+    let e: MaybeScalar = compute_challenge_hash_tweak(&nonce_x_bytes, &aggregated_pubkey, &message);
+
+    // s * G == R + (g * gacc * e * a * P)
+    let challenge_parity = aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc;
+    let challenge_point = (e * effective_pubkey).negate_if(challenge_parity);
+
+    // TODO: double check G1 or G2
+    if partial_signature * G1Projective::prime_subgroup_generator() != effective_nonce + challenge_point {
+        return Err(VerifyError::BadSignature);
+    }
+
+    Ok(())
+}
+
+/// Aggregate a collection of partial adaptor signatures together into a final
+/// adaptor signature on a given `message`, under the aggregated public key in
+/// `key_agg_ctx`.
+///
+/// The resulting signature will not be valid unless adapted with the discrete log
+/// of the `adaptor_point`.
+///
+/// Returns an error if the resulting signature would not be valid.
+pub fn aggregate_partial_adaptor_signatures<S: Into<PartialSignature>>(
+    key_agg_ctx: &KeyAggContext,
+    aggregated_nonce: &AggNonce,
+    adaptor_point: impl Into<MaybePoint>,
+    partial_signatures: impl IntoIterator<Item = S>,
+    message: impl AsRef<[u8]>,
+) -> Result<Signature<ProjectiveCurve>, VerifyError> {
+    let adaptor_point: MaybePoint = adaptor_point.into();
+    let aggregated_pubkey = key_agg_ctx.pubkey;
+
+    let b: MaybeScalar = aggregated_nonce.nonce_coefficient(aggregated_pubkey, &message);
+    let final_nonce: Point = aggregated_nonce.final_nonce(b);
+    let adapted_nonce = final_nonce + adaptor_point;
+    let nonce_x_bytes = adapted_nonce.serialize_xonly();
+    let e: MaybeScalar = compute_challenge_hash_tweak(&nonce_x_bytes, &aggregated_pubkey, &message);
+
+    let aggregated_signature = partial_signatures
+        .into_iter()
+        .map(|sig| sig.into())
+        .sum::<PartialSignature>()
+        + (e * key_agg_ctx.tweak_acc).negate_if(aggregated_pubkey.parity());
+
+    let effective_nonce = if adapted_nonce.has_even_y() {
+        final_nonce
+    } else {
+        -final_nonce
+    };
+
+    // Ensure the signature will verify as valid.
+    if aggregated_signature * G != effective_nonce + e * aggregated_pubkey.to_even_y() {
+        return Err(VerifyError::BadSignature);
+    }
+
+    let adaptor_sig = AdaptorSignature {
+        R: MaybePoint::Valid(final_nonce),
+        s: aggregated_signature,
+    };
+    Ok(adaptor_sig)
 }
