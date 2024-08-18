@@ -24,9 +24,7 @@ use blake2::Blake2s;
 use digest::Digest;
 // use crate::schnorr_signature::{AggregateSignatureScheme};
 use musig2::{
-    errors::{KeyAggError, RoundContributionError, RoundFinalizeError, SignerIndexError, SigningError, VerifyError},
-    tagged_hashes::{BIP0340_CHALLENGE_TAG_HASHER, KEYAGG_COEFF_TAG_HASHER, KEYAGG_LIST_TAG_HASHER, MUSIG_AUX_TAG_HASHER, MUSIG_NONCECOEF_TAG_HASHER, MUSIG_NONCE_TAG_HASHER},
-    LiftedSignature, NonceSeed
+    errors::{KeyAggError, RoundContributionError, RoundFinalizeError, SignerIndexError, SigningError, VerifyError}, tagged_hashes::{BIP0340_CHALLENGE_TAG_HASHER, KEYAGG_COEFF_TAG_HASHER, KEYAGG_LIST_TAG_HASHER, MUSIG_AUX_TAG_HASHER, MUSIG_NONCECOEF_TAG_HASHER, MUSIG_NONCE_TAG_HASHER}, AdaptorSignature, LiftedSignature, NonceSeed
 };
 
 use derivative::Derivative;
@@ -72,10 +70,9 @@ impl<C: ProjectiveCurve> ToBytes for SecretKey<C> {
 
 #[derive(Clone, Default, Debug)]
 pub struct Signature<C: ProjectiveCurve> {
-    pub prover_response: C::ScalarField,
-    pub verifier_challenge: [u8; 32],
+    pub prover_response: C::ScalarField,        // s - scalar representing signature proof
+    pub verifier_challenge: [u8; 32],           // r - point on curve (usually just the x coordinate)
 }
-// TODO: musig2 and simpleworks signatures are totally different... 
 
 impl<C: ProjectiveCurve + Hash> SignatureScheme for Schnorr<C>
 where
@@ -753,6 +750,7 @@ impl FirstRound {
         })
     }
 
+    // NOTE: WE ONLY PASS IN ON SECKEY (LOG AND USER INDIVIDUALLY) AND ORIGINALLY THIS IS INSIDE VEC ITERATOR SO IT WORKS FINE
     pub fn finalize<M>(
         self,
         seckey: impl Into<SecretKey<EdwardsProjective>>,
@@ -788,15 +786,16 @@ impl FirstRound {
     /// same message.
     pub fn finalize_adaptor<M>(
         self,
-        seckey: impl Into<SecretKey<EdwardsProjective>,
+        seckey: SecretKey<EdwardsProjective>,
         // adaptor_point: MaybePoint,
+        // message: M,
         message: M,
     ) -> Result<SecondRound<M>, RoundFinalizeError>
     where
         M: AsRef<[u8]>,
     {
         // let adaptor_point: MaybePoint = adaptor_point.into();
-        let pubnonces: Vec<PubNonce> = self.pubnonce_slots.finalize()?;     // TODO: IMPORT FINALIZE
+        let pubnonces: Vec<PubNonce> = self.pubnonce_slots.finalize()?; // NOT RELATED TO ADAPTOR
         let aggnonce = pubnonces.iter().sum();
 
         let partial_signature = sign_partial_adaptor(
@@ -808,6 +807,7 @@ impl FirstRound {
             &message,
         )?;
 
+        // ISN'T THIS ALWAYS GONNA BE LENGTH 1 FOR US?
         let mut partial_signature_slots = Slots::new(pubnonces.len());
         partial_signature_slots
             .place(partial_signature, self.signer_index)
@@ -867,45 +867,45 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
     /// [`PartialSignature`]. Note that since our signature was constructed
     /// at the end of the first round, this slice will never contain the signer
     /// index provided to [`FirstRound::new`].
-    pub fn holdouts(&self) -> &[usize] {
-        self.partial_signature_slots.remaining()
-    }
+    // pub fn holdouts(&self) -> &[usize] {
+    //     self.partial_signature_slots.remaining()
+    // }
 
     /// Adds a [`PartialSignature`] to the internal state, registering it to a specific
     /// signer at a given index. Returns an error if the signature is not valid, or if
     /// the given signer index is out of range, or if we already have a different partial
     /// signature on-file for that signer.
-    pub fn receive_signature(
-        &mut self,
-        signer_index: usize,
-        partial_signature: impl Into<PartialSignature>,
-    ) -> Result<(), RoundContributionError> {
-        let partial_signature: PartialSignature = partial_signature.into();
-        let signer_pubkey: Point = self.key_agg_ctx.get_pubkey(signer_index).ok_or_else(|| {
-            RoundContributionError::out_of_range(signer_index, self.key_agg_ctx.pubkeys().len())
-        })?;
+    // pub fn receive_signature(
+    //     &mut self,
+    //     signer_index: usize,
+    //     partial_signature: impl Into<PartialSignature>,
+    // ) -> Result<(), RoundContributionError> {
+    //     let partial_signature: PartialSignature = partial_signature.into();
+    //     let signer_pubkey: Point = self.key_agg_ctx.get_pubkey(signer_index).ok_or_else(|| {
+    //         RoundContributionError::out_of_range(signer_index, self.key_agg_ctx.pubkeys().len())
+    //     })?;
 
-        musig2::adaptor::verify_partial(
-            &self.key_agg_ctx,
-            partial_signature,
-            &self.aggnonce,
-            self.adaptor_point,
-            signer_pubkey,
-            &self.pubnonces[signer_index],
-            &self.message,
-        )
-        .map_err(|_| RoundContributionError::invalid_signature(signer_index))?;
+    //     musig2::adaptor::verify_partial(
+    //         &self.key_agg_ctx,
+    //         partial_signature,
+    //         &self.aggnonce,
+    //         // self.adaptor_point,
+    //         signer_pubkey,
+    //         &self.pubnonces[signer_index],
+    //         &self.message,
+    //     )
+    //     .map_err(|_| RoundContributionError::invalid_signature(signer_index))?;
 
-        self.partial_signature_slots
-            .place(partial_signature, signer_index)?;
+    //     self.partial_signature_slots
+    //         .place(partial_signature, signer_index)?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
-    /// Returns true once we have all partial signatures from the group.
-    pub fn is_complete(&self) -> bool {
-        self.holdouts().len() == 0
-    }
+    // /// Returns true once we have all partial signatures from the group.
+    // pub fn is_complete(&self) -> bool {
+    //     self.holdouts().len() == 0
+    // }
 
     /// Finishes the second round once all partial signatures are received,
     /// combining signatures into an aggregated signature on the `message`
@@ -924,9 +924,9 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
         T: From<LiftedSignature>,
     {
         let sig = self
-            .finalize_adaptor::<AdaptorSignature>()?
-            .adapt(MaybeScalar::Zero)
-            .expect("finalizing with empty adaptor should never result in an adaptor failure");
+            .finalize_adaptor::<Signature<EdwardsProjective>>()?;
+            // .adapt(MaybeScalar::Zero)    // WHAT THIS DOES: Adapts the signature into a lifted signature with a given adaptor secret.
+            // .expect("finalizing with empty adaptor should never result in an adaptor failure");
 
         Ok(T::from(sig))
     }
@@ -947,11 +947,10 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
     /// this method will be a valid signature which can be adapted with `MaybeScalar::Zero`.
     pub fn finalize_adaptor<T>(self) -> Result<Signature<EdwardsProjective>, RoundFinalizeError> {
         let partial_signatures: Vec<PartialSignature> = self.partial_signature_slots.finalize()?;   // FINALIZE UNRELATED TO ADAPTOR
-        let final_signature = musig2::adaptor::aggregate_partial_signatures(
+        let final_signature = aggregate_partial_signatures(
             &self.key_agg_ctx,
             &self.aggnonce,
             // self.adaptor_point,
-            partial_signatures,
             &self.message,
         )?;
         Ok(final_signature)
@@ -1023,16 +1022,20 @@ impl AggNonce {
     /// to create signatures.
     pub fn nonce_coefficient<S>(
         &self,
-        aggregated_pubkey: impl Into<Point>,
+        aggregated_pubkey: Point,
         message: impl AsRef<[u8]>,
     ) -> S
     where
         S: From<MaybeScalar>,
     {
+        let r1_bytes = vec![];
+        self.R1.serialize(r1_bytes);
+        let r2_bytes = vec![];
+        self.R2.serialize(r2_bytes);
         let hash: [u8; 32] = MUSIG_NONCECOEF_TAG_HASHER
             .clone()
-            .chain_update(&self.R1.serialize())
-            .chain_update(&self.R2.serialize())
+            .chain_update(&r1_bytes)     // R1 = Point i.e. PublicKey
+            .chain_update(&r2_bytes)
             .chain_update(&aggregated_pubkey.into().serialize_xonly())
             .chain_update(message.as_ref())
             .finalize()
@@ -1061,96 +1064,104 @@ impl AggNonce {
     }
 }
 
-mod encodings {
-    use super::*;
+// mod encodings {
+//     use super::*;
 
-    impl BinaryEncoding for SecNonce {
-        type Serialized = [u8; 64];
+//     impl BinaryEncoding for SecNonce {
+//         type Serialized = [u8; 64];
 
-        /// Returns the binary serialization of `SecNonce`, which serializes
-        /// both inner scalar values into a fixed-length 64-byte array.
-        ///
-        /// Note that this serialization differs from the format suggested
-        /// in BIP327, in that we do not include a public key.
-        fn to_bytes(&self) -> Self::Serialized {
-            let mut serialized = [0u8; 64];
-            serialized[..32].clone_from_slice(&self.k1.serialize());
-            serialized[32..].clone_from_slice(&self.k2.serialize());
-            serialized
-        }
+//         /// Returns the binary serialization of `SecNonce`, which serializes
+//         /// both inner scalar values into a fixed-length 64-byte array.
+//         ///
+//         /// Note that this serialization differs from the format suggested
+//         /// in BIP327, in that we do not include a public key.
+//         fn to_bytes(&self) -> Self::Serialized {
+//             let mut serialized = [0u8; 64];
+//             serialized[..32].clone_from_slice(&self.k1.serialize());
+//             serialized[32..].clone_from_slice(&self.k2.serialize());
+//             serialized
+//         }
 
-        /// Parses a `SecNonce` from a serialized byte slice.
-        /// This byte slice should be 64 bytes long, and encode two
-        /// non-zero 256-bit scalars.
-        ///
-        /// We also accept 97-byte long slices, to be compatible with BIP327's
-        /// suggested serialization format of `SecNonce`.
-        fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError<Self>> {
-            if bytes.len() != 64 && bytes.len() != 97 {
-                return Err(DecodeError::bad_length(bytes.len()));
-            }
-            let k1 = Scalar::from_slice(&bytes[..32])?;
-            let k2 = Scalar::from_slice(&bytes[32..64])?;
-            Ok(SecNonce { k1, k2 })
-        }
-    }
+//         /// Parses a `SecNonce` from a serialized byte slice.
+//         /// This byte slice should be 64 bytes long, and encode two
+//         /// non-zero 256-bit scalars.
+//         ///
+//         /// We also accept 97-byte long slices, to be compatible with BIP327's
+//         /// suggested serialization format of `SecNonce`.
+//         fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError<Self>> {
+//             if bytes.len() != 64 && bytes.len() != 97 {
+//                 return Err(DecodeError::bad_length(bytes.len()));
+//             }
+//             let k1 = Scalar::from_slice(&bytes[..32])?;
+//             let k2 = Scalar::from_slice(&bytes[32..64])?;
+//             Ok(SecNonce { k1, k2 })
+//         }
+//     }
 
-    impl BinaryEncoding for PubNonce {
-        type Serialized = [u8; 66];
+//     impl BinaryEncoding for PubNonce {
+//         type Serialized = [u8; 66];
 
-        /// Returns the binary serialization of `PubNonce`, which serializes
-        /// both inner points into a fixed-length 66-byte array.
-        fn to_bytes(&self) -> Self::Serialized {
-            let mut bytes = [0u8; 66];
-            bytes[..33].clone_from_slice(&self.R1.serialize());
-            bytes[33..].clone_from_slice(&self.R2.serialize());
-            bytes
-        }
+//         /// Returns the binary serialization of `PubNonce`, which serializes
+//         /// both inner points into a fixed-length 66-byte array.
+//         fn to_bytes(&self) -> Self::Serialized {
+//             let r1_bytes = vec![];
+//             self.R1.serialize(r1_bytes);
+//             let r2_bytes = vec![];
+//             self.R2.serialize(r2_bytes);
+//             let mut bytes = [0u8; 66];
+//             bytes[..33].clone_from_slice(&r1_bytes);
+//             bytes[33..].clone_from_slice(&r2_bytes);
+//             bytes
+//         }
 
-        /// Parses a `PubNonce` from a serialized byte slice. This byte slice should
-        /// be 66 bytes long, and encode two compressed, non-infinity curve points.
-        fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError<Self>> {
-            if bytes.len() != 66 {
-                return Err(DecodeError::bad_length(bytes.len()));
-            }
-            let R1 = Point::from_slice(&bytes[..33])?;
-            let R2 = Point::from_slice(&bytes[33..])?;
-            Ok(PubNonce { R1, R2 })
-        }
-    }
+//         /// Parses a `PubNonce` from a serialized byte slice. This byte slice should
+//         /// be 66 bytes long, and encode two compressed, non-infinity curve points.
+//         fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError<Self>> {
+//             if bytes.len() != 66 {
+//                 return Err(DecodeError::bad_length(bytes.len()));
+//             }
+//             let R1 = Point::from_slice(&bytes[..33])?;
+//             let R2 = Point::from_slice(&bytes[33..])?;
+//             Ok(PubNonce { R1, R2 })
+//         }
+//     }
 
-    impl BinaryEncoding for AggNonce {
-        type Serialized = [u8; 66];
+//     impl BinaryEncoding for AggNonce {
+//         type Serialized = [u8; 66];
 
-        /// Returns the binary serialization of `AggNonce`, which serializes
-        /// both inner points into a fixed-length 66-byte array.
-        fn to_bytes(&self) -> Self::Serialized {
-            let mut serialized = [0u8; 66];
-            serialized[..33].clone_from_slice(&self.R1.serialize());
-            serialized[33..].clone_from_slice(&self.R2.serialize());
-            serialized
-        }
+//         /// Returns the binary serialization of `AggNonce`, which serializes
+//         /// both inner points into a fixed-length 66-byte array.
+//         fn to_bytes(&self) -> Self::Serialized {
+//             let r1_bytes = vec![];
+//             self.R1.serialize(r1_bytes);
+//             let r2_bytes = vec![];
+//             self.R2.serialize(r2_bytes);
+//             let mut serialized = [0u8; 66];
+//             serialized[..33].clone_from_slice(&r1_bytes);
+//             serialized[33..].clone_from_slice(&r2_bytes);
+//             serialized
+//         }
 
-        /// Parses an `AggNonce` from a serialized byte slice. This byte slice should
-        /// be 66 bytes long, and encode two compressed (possibly infinity) curve points.
-        fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError<Self>> {
-            if bytes.len() != 66 {
-                return Err(DecodeError::bad_length(bytes.len()));
-            }
-            let R1 = MaybePoint::from_slice(&bytes[..33])?;
-            let R2 = MaybePoint::from_slice(&bytes[33..])?;
-            Ok(AggNonce { R1, R2 })
-        }
-    }
+//         /// Parses an `AggNonce` from a serialized byte slice. This byte slice should
+//         /// be 66 bytes long, and encode two compressed (possibly infinity) curve points.
+//         fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError<Self>> {
+//             if bytes.len() != 66 {
+//                 return Err(DecodeError::bad_length(bytes.len()));
+//             }
+//             let R1 = MaybePoint::from_slice(&bytes[..33])?;
+//             let R2 = MaybePoint::from_slice(&bytes[33..])?;
+//             Ok(AggNonce { R1, R2 })
+//         }
+//     }
 
-    impl_encoding_traits!(SecNonce, 64, 97);
-    impl_encoding_traits!(PubNonce, 66);
-    impl_encoding_traits!(AggNonce, 66);
+//     impl_encoding_traits!(SecNonce, 64, 97);
+//     impl_encoding_traits!(PubNonce, 66);
+//     impl_encoding_traits!(AggNonce, 66);
 
-    // Do not implement Display for SecNonce.
-    impl_hex_display!(PubNonce);
-    impl_hex_display!(AggNonce);
-}
+//     // Do not implement Display for SecNonce.
+//     impl_hex_display!(PubNonce);
+//     impl_hex_display!(AggNonce);
+// }
 
 impl<P> std::iter::Sum<P> for AggNonce
 where
@@ -1330,42 +1341,77 @@ pub fn verify_partial_adaptor(
 /// of the `adaptor_point`.
 ///
 /// Returns an error if the resulting signature would not be valid.
-pub fn aggregate_partial_adaptor_signatures<S: Into<PartialSignature>>(
+pub fn aggregate_partial_adaptor_signatures<S: Into<Signature<EdwardsProjective>>> (
     key_agg_ctx: &KeyAggContext,
     aggregated_nonce: &AggNonce,
-    adaptor_point: impl Into<MaybePoint>,
+    // adaptor_point: impl Into<MaybePoint>,
     partial_signatures: impl IntoIterator<Item = S>,
     message: impl AsRef<[u8]>,
-) -> Result<Signature<ProjectiveCurve>, VerifyError> {
-    let adaptor_point: MaybePoint = adaptor_point.into();
+) -> Result<Signature<EdwardsProjective>, VerifyError> {
+    // let adaptor_point: MaybePoint = adaptor_point.into();
     let aggregated_pubkey = key_agg_ctx.pubkey;
 
     let b: MaybeScalar = aggregated_nonce.nonce_coefficient(aggregated_pubkey, &message);
     let final_nonce: Point = aggregated_nonce.final_nonce(b);
-    let adapted_nonce = final_nonce + adaptor_point;
-    let nonce_x_bytes = adapted_nonce.serialize_xonly();
-    let e: MaybeScalar = compute_challenge_hash_tweak(&nonce_x_bytes, &aggregated_pubkey, &message);
+    // let adapted_nonce = final_nonce + adaptor_point;
+    let nonce_x_bytes = vec![];
+    final_nonce.x.serialize(nonce_x_bytes);
+    let mut array = [0u8; 32];
+    array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
+    // let nonce_x_bytes = final_nonce.x.serialize();
+    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message);
 
     let aggregated_signature = partial_signatures
         .into_iter()
         .map(|sig| sig.into())
-        .sum::<PartialSignature>()
+        .sum::<Signature<EdwardsProjective>>()
         + (e * key_agg_ctx.tweak_acc).negate_if(aggregated_pubkey.parity());
 
-    let effective_nonce = if adapted_nonce.has_even_y() {
-        final_nonce
-    } else {
-        -final_nonce
-    };
+    // let effective_nonce = if final_nonce.has_even_y() {
+    //     final_nonce
+    // } else {
+    //     -final_nonce
+    // };
 
+    // NOTE: TAKEN OUT FOR ACTUAL SECURITY IMPLEMENTATION
     // Ensure the signature will verify as valid.
-    if aggregated_signature * G != effective_nonce + e * aggregated_pubkey.to_even_y() {
-        return Err(VerifyError::BadSignature);
-    }
+    // if aggregated_signature * G != effective_nonce + e * aggregated_pubkey.to_even_y() {
+    //     return Err(VerifyError::BadSignature);
+    // }
 
-    let adaptor_sig = AdaptorSignature {
-        R: MaybePoint::Valid(final_nonce),
-        s: aggregated_signature,
+    let agg_sig = Signature {
+        prover_response: aggregated_signature,        // s - scalar representing signature proof
+        verifier_challenge: final_nonce,
     };
-    Ok(adaptor_sig)
+
+    Ok(agg_sig)
+}
+
+/// Aggregate a collection of partial signatures together into a final
+/// signature on a given `message`, valid under the aggregated public
+/// key in `key_agg_ctx`.
+///
+/// Returns an error if the resulting signature would not be valid.
+pub fn aggregate_partial_signatures<S, T>(
+    key_agg_ctx: &KeyAggContext,
+    aggregated_nonce: &AggNonce,
+    // partial_signatures: impl IntoIterator<Item = S>,
+    message: impl AsRef<[u8]>,
+) -> Result<T, VerifyError>
+where
+    S: Into<PartialSignature>,
+    T: From<LiftedSignature>,
+{
+    let sig = aggregate_partial_adaptor_signatures(
+        key_agg_ctx,
+        aggregated_nonce,
+        MaybePoint::Infinity,
+        // partial_signatures,
+        message,
+    )?
+    // .adapt(MaybeScalar::Zero)
+    .map(T::from)
+    .expect("aggregating with empty adaptor should never result in an adaptor failure");
+
+    Ok(sig)
 }
