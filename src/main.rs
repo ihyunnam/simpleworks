@@ -35,6 +35,7 @@ fn main() {
     let msg3 = msg.clone();
     
     /* AGGREGATE SCHNORR ATTEMPT */
+    
     let schnorr_param: Parameters<C> = Schnorr::<C>::setup(rng).unwrap();
     
     // log and user both only need one pair
@@ -90,6 +91,7 @@ fn main() {
 
     let partial_signature_user: PartialSignature = second_round_user.our_signature();
 
+    // println!("USER PARTIAL SIGNATURE RETRIEVED {:?}", partial_signature_user);   // CORRECT
     // LOG CREATES SECOND ROUND 2
     let second_round_log: SecondRound<Vec<u8>> = first_round_log
         .finalize(log_sk, msg2, pubnonces)
@@ -99,6 +101,7 @@ fn main() {
     
     let second_rounds = vec![second_round_user, second_round_log];
     let partial_signatures = vec![partial_signature_user, partial_signature_log];
+    // println!("LOG PARTIAL SIGNATURE RETRIEVED {:?}", partial_signature_log);     // CORRECT
     
     // MESSAGE DEPENDENT BECAUSE IT'S THE SIGNATURE - THIS IS OK
     // FINALIZATION: signatures can now be aggregated.
@@ -114,12 +117,13 @@ fn main() {
 
     let last_sig = signatures.pop().unwrap();
 
-    // All signers should output the same aggregated signature.
+    // println!("PROVER RESPONSE {:?}", last_sig.prover_response);
+    // println!("VERIFIER CHALLENGE {:?}", last_sig.verifier_challenge);
+
+    // All signers should output the same aggregated signature.     // CORRECT
     // for sig in signatures {
-    //     assert_eq!(
-    //         sig, last_sig,
-    //         "some signers created different aggregated signatures"
-    //     );
+    //     println!("PROVER RESPONSE {:?}", sig.prover_response);
+    //     println!("VERIFIER CHALLENGE {:?}", sig.verifier_challenge);
     // }
 
     // and of course, the sig should be verifiable as a standard schnorr signature.

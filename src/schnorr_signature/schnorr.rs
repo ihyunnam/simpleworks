@@ -153,39 +153,76 @@ where
     }
 
     fn verify(
-        parameters: &Self::Parameters,
+        parameters: &Self::Parameters,  // (dummy) needed because using crpto-primitives SignatureScheme
         pk: &Self::PublicKey,
         message: &[u8],
         signature: &Self::Signature,
     ) -> Result<bool, Error> {
         let Signature {
-            prover_response,
-            verifier_challenge,
+            prover_response,    // s
+            verifier_challenge, // rx
         } = signature;
-        let verifier_challenge_fe = C::ScalarField::from_be_bytes_mod_order(verifier_challenge);
+        let verifier_challenge_fe = C::ScalarField::from_be_bytes_mod_order(verifier_challenge);    // e
         // sG = kG - eY
         // kG = sG + eY
         // so we first solve for kG.
-        let mut claimed_prover_commitment = parameters.generator.mul(*prover_response);
-        let public_key_times_verifier_challenge = pk.mul(verifier_challenge_fe);
-        claimed_prover_commitment += &public_key_times_verifier_challenge;
-        let claimed_prover_commitment = claimed_prover_commitment.into_affine();
 
-        // e = H(salt, kG, msg)
+        let e: MaybeScalar = compute_challenge_hash_tweak(&verifier_challenge, &pk, message);
+
+        let mut agg_pubkey_serialized = vec![];
+        pk.serialize(&mut agg_pubkey_serialized);
+
         let mut hash_input = Vec::new();
-        if let Some(salt) = parameters.salt {
-            hash_input.extend_from_slice(&salt);
-        }
-        hash_input.extend_from_slice(&to_bytes![pk]?);
-        hash_input.extend_from_slice(&to_bytes![claimed_prover_commitment]?);
+        hash_input.extend_from_slice(verifier_challenge);
+        hash_input.extend_from_slice(agg_pubkey_serialized.as_slice());
         hash_input.extend_from_slice(message);
 
-        // cast the hash output to get e
         let obtained_verifier_challenge = &*Blake2s::digest(&hash_input);
+
+        // pub fn compute_challenge_hash_tweak<S: From<MaybeScalar>>(
+        //     final_nonce_xonly: &[u8; 32],        // verifier_challenge
+        //     aggregated_pubkey: &Point,           // pk
+        //     message: impl AsRef<[u8]>,           // message
+        // ) -> S {
+        //     let mut agg_pubkey_serialized = vec![];
+        //     aggregated_pubkey.serialize(&mut agg_pubkey_serialized);
+        //     // let agg_pubkey_copy = agg_pubkey_serialized.clone();
+        //     let hash: [u8; 32] = BIP0340_CHALLENGE_TAG_HASHER
+        //         .clone()
+        //         .chain_update(final_nonce_xonly)
+        //         .chain_update(&agg_pubkey_serialized)
+        //         .chain_update(message.as_ref())
+        //         .finalize()
+        //         .into();
+        
+        //     S::from(MaybeScalar::from_be_bytes_mod_order(&hash))
+        // }
+
+        
+        let verification_point = C::prime_subgroup_generator().into().mul(prover_response) - pk.mul(e);
+        let mut verification_point_bytes = vec![];
+        verification_point.serialize(&mut verification_point_bytes);
+        // let mut claimed_prover_commitment = parameters.generator.mul(*prover_response); // s*G
+        // let public_key_times_verifier_challenge = pk.mul(verifier_challenge_fe);    //e*pubkey
+        // claimed_prover_commitment += &public_key_times_verifier_challenge;  // s*G + e*pubkey
+        // let claimed_prover_commitment = claimed_prover_commitment.into_affine();
+
+        // // e = H(salt, kG, msg)
+        // let mut hash_input = Vec::new();
+        // if let Some(salt) = parameters.salt {
+        //     hash_input.extend_from_slice(&salt);
+        // }
+        // hash_input.extend_from_slice(&to_bytes![pk]?);
+        // hash_input.extend_from_slice(&to_bytes![claimed_prover_commitment]?);
+        // hash_input.extend_from_slice(message);
+
+        // cast the hash output to get e
+        // let obtained_verifier_challenge = &*Blake2s::digest(&hash_input);
 
         // The signature is valid iff the computed verifier challenge is the same as the one
         // provided in the signature
-        Ok(verifier_challenge == obtained_verifier_challenge)
+        // Ok(verifier_challenge == obtained_verifier_challenge)
+        Ok(verification_point_bytes == verifier_challenge)
     }
 
     // TODO: Implement
@@ -420,10 +457,11 @@ impl SecNonce {
         SecNonceBuilder::new(nonce_seed)
     }
 
+    // generator in pubkey generation = C::prime_subgroup_generator().into()
     pub fn public_nonce(&self) -> PubNonce {
         PubNonce {
-            R1: GroupAffine::prime_subgroup_generator().mul(self.k1.secret_key).into_affine(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-381.
-            R2: GroupAffine::prime_subgroup_generator().mul(self.k2.secret_key).into_affine(),
+            R1: EdwardsProjective::prime_subgroup_generator().mul(self.k1.secret_key).into_affine(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-381.
+            R2: EdwardsProjective::prime_subgroup_generator().mul(self.k2.secret_key).into_affine(),
         }
     }
 }
@@ -785,7 +823,7 @@ impl FirstRound {
             // .with_spices(spices)     // SEEMS EXTRA
             .build();
 
-        let pubnonce = secnonce.public_nonce();
+        // let pubnonce = secnonce.public_nonce();
         // println!("PUBLIC NONCE COMPUTED INSIDE NEW {:?}", pubnonce);
 
         // let mut pubnonce_slots = Slots::new(key_agg_ctx.ordered_pubkeys.len());
@@ -862,11 +900,15 @@ impl FirstRound {
             &message,
         )?;
 
+        // println!("PARTIAL SIGNATURE CREATED {:?} FOR {:?}", partial_signature, self.signer_index);
         let mut partial_signature_slots = Slots::new(pubnonces.len());
+        // println!("SLOTS SIZE {:?}", pubnonces.len());    // SLOTS SIZE 2 AS REQUIRED
         partial_signature_slots
             .place(partial_signature, self.signer_index)
             .unwrap(); // never fails
 
+        // println!("AGGNONCE INSIDE FINALIZE ADAPTOR {:?}", aggnonce); // NOTE: AGGNONCE EQUAL AS REQUIRED
+        // println!("MESSAGE INSIDE PARTIAL SIGNATURE{:?}", message);
         let second_round = SecondRound {
             key_agg_ctx: self.key_agg_ctx,
             signer_index: self.signer_index,
@@ -1023,12 +1065,6 @@ pub struct AggNonce {
 
 impl AggNonce {
     /// Construct a new `AggNonce` from the given pair of public nonce points.
-    pub fn new<T: Into<MaybePoint>>(R1: T, R2: T) -> AggNonce {
-        AggNonce {
-            R1: R1.into(),
-            R2: R2.into(),
-        }
-    }
 
     pub fn sum<T, I>(nonces: I) -> AggNonce
     where
@@ -1093,11 +1129,13 @@ impl AggNonce {
     //     P: From<Point>,
     {
         let nonce_coeff: MaybeScalar = nonce_coeff.into();
-        let aggnonce_sum = self.R1.add((self.R2.mul(nonce_coeff).into_affine()));
+        let aggnonce_sum = self.R1 + (self.R2.mul(nonce_coeff).into_affine());
         // P::from(match aggnonce_sum {
         //     MaybePoint::Infinity => Point::generator(),
         //     MaybePoint::Valid(p) => p,
         // })
+
+        println!("AGGNONCE SUM {:?}", aggnonce_sum);
         aggnonce_sum
     }
 }
@@ -1151,8 +1189,9 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     // if aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc {     // NOTE: TOOK OUT PARITY CHECK
     //     d.neg();    
     // }
+    // println!("D SUPPOSED TO BE SAME {:?}", d);
     // let nonce_x_bytes = adapted_nonce.serialize_xonly();
-    let mut nonce_x_bytes = vec![];
+    let mut nonce_x_bytes = vec![];     // TODO: INEFFICIENT (also look into affine addition - inefficient)
     final_nonce.serialize(&mut nonce_x_bytes);
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);
@@ -1245,10 +1284,15 @@ pub fn verify_partial_adaptor(
     let final_nonce: Point = aggregated_nonce.final_nonce(b);
     // let adapted_nonce = final_nonce + adaptor_point.into();
 
-    let mut effective_nonce = individual_pubnonce.R1.add(individual_pubnonce.R2.mul(b).into_affine());
+    let effective_nonce = individual_pubnonce.R1 + individual_pubnonce.R2.mul(b).into_affine();
 
     // Don't need constant time ops here as adapted_nonce is public.
     // if final_nonce.has_odd_y() {         // NOTE: TOOK OUT PARITY CHECK
+    //     effective_nonce = -effective_nonce;
+    // }
+
+    // TODO: ORIGINAL CODE HAS PARITY CHECK
+    //     if adapted_nonce.has_odd_y() {
     //     effective_nonce = -effective_nonce;
     // }
 
