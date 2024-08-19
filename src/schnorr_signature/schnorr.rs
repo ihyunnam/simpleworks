@@ -334,12 +334,12 @@ impl KeyAggContext {
                 .map(|&pubkey| {
                     let key_coeff =
                         compute_key_aggregation_coefficient(&pk_list_hash, &pubkey, pk2);
-                    (pubkey.mul(key_coeff), key_coeff)
+                    (pubkey.mul(key_coeff).into_affine(), key_coeff)
                 })
                 .unzip();
 
         // let aggregated_pubkey = MaybePoint::sum(&effective_pubkeys);
-        let aggregated_pubkey = effective_pubkeys.into_iter().fold(GroupAffine::<P>::default(), |acc, item| acc + &item);
+        let aggregated_pubkey = effective_pubkeys.clone().into_iter().fold(GroupAffine::default(), |acc, item| acc + &item);
 
         let pubkey_indexes = HashMap::from_iter(
             ordered_pubkeys
@@ -1000,9 +1000,12 @@ impl AggNonce {
             .map(|pubnonce| (pubnonce.borrow().R1, pubnonce.borrow().R2))
             .unzip();
 
+        let sum_r1 = r1s.into_iter().fold(Point::zero(), |acc, point| acc.add(&point));
+        let sum_r2 = r2s.into_iter().fold(Point::zero(), |acc, point| acc.add(&point));
+
         AggNonce {
-            R1: Point::sum(r1s),
-            R2: Point::sum(r2s),
+            R1: sum_r1,        // result is maybepoint
+            R2: sum_r2,
         }
     }
 
@@ -1044,16 +1047,17 @@ impl AggNonce {
     /// Most use-cases will not need to invoke this method. Instead use
     /// [`sign_solo`][crate::sign_solo] or [`sign_partial`][crate::sign_partial]
     /// to create signatures.
-    pub fn final_nonce<P>(&self, nonce_coeff: impl Into<MaybeScalar>) -> P
-    where
-        P: From<Point>,
+    pub fn final_nonce(&self, nonce_coeff: impl Into<MaybeScalar>) -> Point // NOTE: changed from generic point parameter P
+    // where
+    //     P: From<Point>,
     {
         let nonce_coeff: MaybeScalar = nonce_coeff.into();
         let aggnonce_sum = self.R1.add((self.R2.mul(nonce_coeff).into_affine()));
-        P::from(match aggnonce_sum {
-            MaybePoint::Infinity => Point::generator(),
-            MaybePoint::Valid(p) => p,
-        })
+        // P::from(match aggnonce_sum {
+        //     MaybePoint::Infinity => Point::generator(),
+        //     MaybePoint::Valid(p) => p,
+        // })
+        aggnonce_sum
     }
 }
 
