@@ -12,7 +12,7 @@ debug-assertions = true
 
 [dependencies]
 # Arkworks dependencies
-ark-ed-on-bls12-381 = { version = "^0.3.0", default-features = false }
+ark-ed-on-bls12-381 = { version = "^0.3.0", default-features = false, features = ["r1cs"] }
 ark-ff = { version = "^0.3.0", default-features = false }
 ark-ec = { version = "^0.3.0", default-features = false }
 ark-ed-on-bls12-377 = { version = "^0.3.0", features = ["r1cs"] }
@@ -35,7 +35,7 @@ ark-bls12-381 = { version = "^0.3.0", default-features = true }
 
 # we use our fork of marlin crate, branch "use-constraint-system-directly"
 ark-marlin = { git = "https://github.com/Entropy1729/marlin.git", branch = "use-constraint-system-directly" }
-rand = { version = "0.8", default-features = false, features = ["std_rng"]}
+rand = { version = "0.8", default-features = false, features = ["std_rng", "getrandom"] }
 
 # Important Note: the version of blake2 must be 0.9
 blake2 = { version = "0.9" }

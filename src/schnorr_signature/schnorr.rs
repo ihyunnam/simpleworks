@@ -654,8 +654,8 @@ impl<T: Clone + Eq> Slots<T> {
     fn new(expected_size: usize) -> Slots<T> {
         let mut slots = Vec::new();
         slots.resize(expected_size, None);
-        // let open_slots = Vec::from_iter(0..expected_size);
-        let open_slots = vec![]; // NOTE: CHANGED TO 0 TO DISABLE 'WAITING FOR NONCES'
+        let open_slots = Vec::from_iter(0..expected_size);
+        // let open_slots = vec![]; // NOTE: CHANGED TO 0 TO DISABLE 'WAITING FOR NONCES'
         Slots { slots, open_slots }
     }
 
@@ -717,7 +717,7 @@ pub struct FirstRound {
     key_agg_ctx: KeyAggContext,
     signer_index: usize, // Our key's index in `key_agg_ctx`
     secnonce: SecNonce,  // Our secret nonce.
-    pubnonce_slots: Slots<PubNonce>,
+    // pubnonce_slots: Slots<PubNonce>,
 }
 
 impl FirstRound {
@@ -758,14 +758,14 @@ impl FirstRound {
 
         let pubnonce = secnonce.public_nonce();
 
-        let mut pubnonce_slots = Slots::new(key_agg_ctx.ordered_pubkeys.len());
-        pubnonce_slots.place(pubnonce, signer_index).unwrap(); // never fails
+        // let mut pubnonce_slots = Slots::new(key_agg_ctx.ordered_pubkeys.len());
+        // pubnonce_slots.place(pubnonce, signer_index).unwrap(); // never fails
 
         Ok(FirstRound {
             key_agg_ctx,
             secnonce,
             signer_index,
-            pubnonce_slots,
+            // pubnonce_slots,
         })
     }
 
@@ -774,11 +774,12 @@ impl FirstRound {
         self,
         seckey: SecretKey<EdwardsProjective>,
         message: M,
+        pubnonces: Vec<PubNonce>,
     ) -> Result<SecondRound<M>, RoundFinalizeError>
     where
         M: AsRef<[u8]>,
     {
-        self.finalize_adaptor(seckey, message)
+        self.finalize_adaptor(seckey, message, pubnonces)
     }
 
     /// Finishes the first round once all nonces are received, combining nonces
@@ -809,12 +810,13 @@ impl FirstRound {
         // adaptor_point: MaybePoint,
         // message: M,
         message: M,
+        pubnonces: Vec<PubNonce>
     ) -> Result<SecondRound<M>, RoundFinalizeError>
     where
         M: AsRef<[u8]>,
     {
         // let adaptor_point: MaybePoint = adaptor_point.into();
-        let pubnonces: Vec<PubNonce> = self.pubnonce_slots.finalize()?; // NOT RELATED TO ADAPTOR
+        // let pubnonces: Vec<PubNonce> = self.pubnonce_slots.finalize()?; // NOT RELATED TO ADAPTOR
         let aggnonce = pubnonces.iter().sum();
 
         let partial_signature = sign_partial_adaptor(
@@ -826,7 +828,6 @@ impl FirstRound {
             &message,
         )?;
 
-        // ISN'T THIS ALWAYS GONNA BE LENGTH 1 FOR US?
         let mut partial_signature_slots = Slots::new(pubnonces.len());
         partial_signature_slots
             .place(partial_signature, self.signer_index)
@@ -938,12 +939,12 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
     /// If the [`FirstRound`] was finalized with [`FirstRound::finalize_adaptor`], then
     /// the second round must also be finalized with [`SecondRound::finalize_adaptor`],
     /// otherwise this method will return [`RoundFinalizeError::InvalidAggregatedSignature`].
-    pub fn finalize(self) -> Result<Signature<EdwardsProjective>, RoundFinalizeError>
+    pub fn finalize(self, partial_signatures: Vec<PartialSignature>) -> Result<Signature<EdwardsProjective>, RoundFinalizeError>
     // where
     //     T: From<LiftedSignature>,
     {
         let sig = self
-            .finalize_adaptor()?;
+            .finalize_adaptor(partial_signatures)?;
             // .adapt(MaybeScalar::Zero)    // WHAT THIS DOES: Adapts the signature into a lifted signature with a given adaptor secret.
             // .expect("finalizing with empty adaptor should never result in an adaptor failure");
 
@@ -964,8 +965,8 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
     ///
     /// If this signing session did not use adaptor signatures, the signature returned by
     /// this method will be a valid signature which can be adapted with `MaybeScalar::Zero`.
-    pub fn finalize_adaptor(self) -> Result<Signature<EdwardsProjective>, RoundFinalizeError> {
-        let partial_signatures: Vec<PartialSignature> = self.partial_signature_slots.finalize()?;   // FINALIZE UNRELATED TO ADAPTOR
+    pub fn finalize_adaptor(self, partial_signatures: Vec<PartialSignature>) -> Result<Signature<EdwardsProjective>, RoundFinalizeError> {
+        // let partial_signatures: Vec<PartialSignature> = self.partial_signature_slots.finalize()?;   // FINALIZE UNRELATED TO ADAPTOR
         let final_signature = aggregate_partial_signatures(
             &self.key_agg_ctx,
             &self.aggnonce,
