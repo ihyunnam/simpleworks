@@ -720,6 +720,10 @@ pub struct FirstRound {
 }
 
 impl FirstRound {
+    pub fn our_public_nonce(&self) -> PubNonce {
+        self.secnonce.public_nonce()
+    }
+    
     /// Start the first round of a MuSig2 signing session.
     ///
     /// Generates the nonce using the given random seed value, which can
