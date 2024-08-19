@@ -654,7 +654,8 @@ impl<T: Clone + Eq> Slots<T> {
     fn new(expected_size: usize) -> Slots<T> {
         let mut slots = Vec::new();
         slots.resize(expected_size, None);
-        let open_slots = Vec::from_iter(0..expected_size);
+        // let open_slots = Vec::from_iter(0..expected_size);
+        let open_slots = vec![]; // NOTE: CHANGED TO 0 TO DISABLE 'WAITING FOR NONCES'
         Slots { slots, open_slots }
     }
 
