@@ -1,4 +1,4 @@
-use std::ops::Neg;
+use std::ops::Add;
 use ark_bls12_377::FrParameters;
 // use subtle::ConstantTimeEq as _;
 use ark_serialize::CanonicalSerialize;
@@ -297,6 +297,11 @@ impl KeyAggContext {
         T::from(self.pubkey)
     }
 
+    pub fn effective_pubkey<T: From<MaybePoint>>(&self, pubkey: impl Into<Point>) -> Option<T> {
+        let index = self.pubkey_index(pubkey)?;
+        Some(T::from(self.effective_pubkeys[index]))
+    }
+
     pub fn new(ordered_pubkeys: Vec<Point>) -> Result<Self, KeyAggError>
     where
         // I: IntoIterator<Item = P>,
@@ -354,6 +359,15 @@ impl KeyAggContext {
             tweak_acc: Fr::zero(),
         })
     }
+
+    pub fn pubkey_index(&self, pubkey: impl Into<Point>) -> Option<usize> {
+        self.pubkey_indexes.get(&pubkey.into()).copied()
+    }
+
+    pub fn key_coefficient(&self, pubkey: impl Into<Point>) -> Option<MaybeScalar> {
+        let index = self.pubkey_index(pubkey)?;
+        Some(self.key_coefficients[index])
+    }
 }
 
 pub struct SecNonce {
@@ -379,8 +393,8 @@ impl SecNonce {
 
     pub fn public_nonce(&self) -> PubNonce {
         PubNonce {
-            R1: self.k1.secret_key * EdwardsProjective::prime_subgroup_generator().into(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-381.
-            R2: self.k2.secret_key * EdwardsProjective::prime_subgroup_generator().into(),
+            R1: GroupAffine::prime_subgroup_generator().mul(self.k1.secret_key).into_affine(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-381.
+            R2: GroupAffine::prime_subgroup_generator().mul(self.k2.secret_key).into_affine(),
         }
     }
 }
@@ -835,7 +849,7 @@ pub fn xor_bytes<const SIZE: usize>(a: &[u8; SIZE], b: &[u8; SIZE]) -> [u8; SIZE
     out
 }
 
-pub type PartialSignature = Fr;
+pub type PartialSignature = <EdwardsProjective as ProjectiveCurve>::ScalarField;
 
 pub struct SecondRound<M: AsRef<[u8]>> {
     key_agg_ctx: KeyAggContext,
@@ -924,7 +938,7 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
     //     T: From<LiftedSignature>,
     {
         let sig = self
-            .finalize_adaptor::<Signature<EdwardsProjective>>()?;
+            .finalize_adaptor()?;
             // .adapt(MaybeScalar::Zero)    // WHAT THIS DOES: Adapts the signature into a lifted signature with a given adaptor secret.
             // .expect("finalizing with empty adaptor should never result in an adaptor failure");
 
@@ -950,7 +964,7 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
         let final_signature = aggregate_partial_signatures(
             &self.key_agg_ctx,
             &self.aggnonce,
-            // self.adaptor_point,
+            partial_signatures,
             &self.message,
         )?;
         Ok(final_signature)
@@ -976,31 +990,6 @@ impl AggNonce {
         }
     }
 
-    /// Aggregates many partial public nonces together into an aggregated nonce.
-    ///
-    /// ```
-    /// use musig2::{AggNonce, PubNonce};
-    ///
-    /// let nonces: [PubNonce; 2] = [
-    ///     "0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798\
-    ///      032DE2662628C90B03F5E720284EB52FF7D71F4284F627B68A853D78C78E1FFE93"
-    ///         .parse()
-    ///         .unwrap(),
-    ///     "028465FCF0BBDBCF443AABCCE533D42B4B5A10966AC09A49655E8C42DAAB8FCD61\
-    ///      037496A3CC86926D452CAFCFD55D25972CA1675D549310DE296BFF42F72EEEA8C9"
-    ///         .parse()
-    ///         .unwrap(),
-    /// ];
-    ///
-    /// let expected =
-    ///     "02aebee092fe428c3b4c53993c3f80eecbf88ca935469b5bfcaabecb7b2afbb1a6\
-    ///      03c923248ac1f639368bc82345698dfb445dca6024b9ba5a9bafe971bb5813964b"
-    ///         .parse::<AggNonce>()
-    ///         .unwrap();
-    ///
-    /// assert_eq!(musig2::AggNonce::sum(&nonces), expected);
-    /// assert_eq!(musig2::AggNonce::sum(nonces), expected);
-    /// ```
     pub fn sum<T, I>(nonces: I) -> AggNonce
     where
         T: std::borrow::Borrow<PubNonce>,
@@ -1030,15 +1019,17 @@ impl AggNonce {
     where
         S: From<MaybeScalar>,
     {
-        let r1_bytes = vec![];
-        self.R1.serialize(r1_bytes);
-        let r2_bytes = vec![];
-        self.R2.serialize(r2_bytes);
+        let mut r1_bytes = vec![];
+        self.R1.serialize(&mut r1_bytes);
+        let mut r2_bytes = vec![];
+        self.R2.serialize(&mut r2_bytes);
+        let mut aggregated_pubkey_bytes = vec![];
+        aggregated_pubkey.serialize(&mut aggregated_pubkey_bytes);
         let hash: [u8; 32] = MUSIG_NONCECOEF_TAG_HASHER
             .clone()
             .chain_update(&r1_bytes)     // R1 = Point i.e. PublicKey
             .chain_update(&r2_bytes)
-            .chain_update(&aggregated_pubkey.into().serialize_xonly())
+            .chain_update(&aggregated_pubkey_bytes) // NOTE: CHANGED FROM XONLY
             .chain_update(message.as_ref())
             .finalize()
             .into();
@@ -1058,7 +1049,7 @@ impl AggNonce {
         P: From<Point>,
     {
         let nonce_coeff: MaybeScalar = nonce_coeff.into();
-        let aggnonce_sum = self.R1 + (nonce_coeff * self.R2);
+        let aggnonce_sum = self.R1.add((self.R2.mul(nonce_coeff).into_affine()));
         P::from(match aggnonce_sum {
             MaybePoint::Infinity => Point::generator(),
             MaybePoint::Valid(p) => p,
@@ -1066,134 +1057,10 @@ impl AggNonce {
     }
 }
 
-// mod encodings {
-//     use super::*;
-
-//     impl BinaryEncoding for SecNonce {
-//         type Serialized = [u8; 64];
-
-//         /// Returns the binary serialization of `SecNonce`, which serializes
-//         /// both inner scalar values into a fixed-length 64-byte array.
-//         ///
-//         /// Note that this serialization differs from the format suggested
-//         /// in BIP327, in that we do not include a public key.
-//         fn to_bytes(&self) -> Self::Serialized {
-//             let mut serialized = [0u8; 64];
-//             serialized[..32].clone_from_slice(&self.k1.serialize());
-//             serialized[32..].clone_from_slice(&self.k2.serialize());
-//             serialized
-//         }
-
-//         /// Parses a `SecNonce` from a serialized byte slice.
-//         /// This byte slice should be 64 bytes long, and encode two
-//         /// non-zero 256-bit scalars.
-//         ///
-//         /// We also accept 97-byte long slices, to be compatible with BIP327's
-//         /// suggested serialization format of `SecNonce`.
-//         fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError<Self>> {
-//             if bytes.len() != 64 && bytes.len() != 97 {
-//                 return Err(DecodeError::bad_length(bytes.len()));
-//             }
-//             let k1 = Scalar::from_slice(&bytes[..32])?;
-//             let k2 = Scalar::from_slice(&bytes[32..64])?;
-//             Ok(SecNonce { k1, k2 })
-//         }
-//     }
-
-//     impl BinaryEncoding for PubNonce {
-//         type Serialized = [u8; 66];
-
-//         /// Returns the binary serialization of `PubNonce`, which serializes
-//         /// both inner points into a fixed-length 66-byte array.
-//         fn to_bytes(&self) -> Self::Serialized {
-//             let r1_bytes = vec![];
-//             self.R1.serialize(r1_bytes);
-//             let r2_bytes = vec![];
-//             self.R2.serialize(r2_bytes);
-//             let mut bytes = [0u8; 66];
-//             bytes[..33].clone_from_slice(&r1_bytes);
-//             bytes[33..].clone_from_slice(&r2_bytes);
-//             bytes
-//         }
-
-//         /// Parses a `PubNonce` from a serialized byte slice. This byte slice should
-//         /// be 66 bytes long, and encode two compressed, non-infinity curve points.
-//         fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError<Self>> {
-//             if bytes.len() != 66 {
-//                 return Err(DecodeError::bad_length(bytes.len()));
-//             }
-//             let R1 = Point::from_slice(&bytes[..33])?;
-//             let R2 = Point::from_slice(&bytes[33..])?;
-//             Ok(PubNonce { R1, R2 })
-//         }
-//     }
-
-//     impl BinaryEncoding for AggNonce {
-//         type Serialized = [u8; 66];
-
-//         /// Returns the binary serialization of `AggNonce`, which serializes
-//         /// both inner points into a fixed-length 66-byte array.
-//         fn to_bytes(&self) -> Self::Serialized {
-//             let r1_bytes = vec![];
-//             self.R1.serialize(r1_bytes);
-//             let r2_bytes = vec![];
-//             self.R2.serialize(r2_bytes);
-//             let mut serialized = [0u8; 66];
-//             serialized[..33].clone_from_slice(&r1_bytes);
-//             serialized[33..].clone_from_slice(&r2_bytes);
-//             serialized
-//         }
-
-//         /// Parses an `AggNonce` from a serialized byte slice. This byte slice should
-//         /// be 66 bytes long, and encode two compressed (possibly infinity) curve points.
-//         fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError<Self>> {
-//             if bytes.len() != 66 {
-//                 return Err(DecodeError::bad_length(bytes.len()));
-//             }
-//             let R1 = MaybePoint::from_slice(&bytes[..33])?;
-//             let R2 = MaybePoint::from_slice(&bytes[33..])?;
-//             Ok(AggNonce { R1, R2 })
-//         }
-//     }
-
-//     impl_encoding_traits!(SecNonce, 64, 97);
-//     impl_encoding_traits!(PubNonce, 66);
-//     impl_encoding_traits!(AggNonce, 66);
-
-//     // Do not implement Display for SecNonce.
-//     impl_hex_display!(PubNonce);
-//     impl_hex_display!(AggNonce);
-// }
-
 impl<P> std::iter::Sum<P> for AggNonce
 where
     P: std::borrow::Borrow<PubNonce>,
 {
-    /// Implements summation of partial public nonces into an aggregated nonce.
-    ///
-    /// ```
-    /// use musig2::{AggNonce, PubNonce};
-    ///
-    /// let nonces = [
-    ///     "0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798\
-    ///      032DE2662628C90B03F5E720284EB52FF7D71F4284F627B68A853D78C78E1FFE93"
-    ///         .parse::<PubNonce>()
-    ///         .unwrap(),
-    ///     "028465FCF0BBDBCF443AABCCE533D42B4B5A10966AC09A49655E8C42DAAB8FCD61\
-    ///      037496A3CC86926D452CAFCFD55D25972CA1675D549310DE296BFF42F72EEEA8C9"
-    ///         .parse::<PubNonce>()
-    ///         .unwrap(),
-    /// ];
-    ///
-    /// let expected =
-    ///     "02aebee092fe428c3b4c53993c3f80eecbf88ca935469b5bfcaabecb7b2afbb1a6\
-    ///      03c923248ac1f639368bc82345698dfb445dca6024b9ba5a9bafe971bb5813964b"
-    ///         .parse::<AggNonce>()
-    ///         .unwrap();
-    ///
-    /// assert_eq!(nonces.iter().sum::<AggNonce>(), expected);
-    /// assert_eq!(nonces.into_iter().sum::<AggNonce>(), expected);
-    /// ```
     fn sum<I>(iter: I) -> Self
     where
         I: Iterator<Item = P>,
@@ -1220,9 +1087,9 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     // NOTE: TOOK OUT CORRECTNESS CHECK
     // As a side-effect, looking up the cached key coefficient also confirms
     // the individual key is indeed part of the aggregated key.
-    // let key_coeff = key_agg_ctx
-    //     .key_coefficient(pubkey)
-    //     .ok_or(SigningError::UnknownKey)?;
+    let key_coeff = key_agg_ctx
+        .key_coefficient(pubkey)
+        .ok_or(SigningError::UnknownKey)?;
 
     let aggregated_pubkey = key_agg_ctx.pubkey;
     let pubnonce = secnonce.public_nonce();
@@ -1236,12 +1103,12 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     // has odd parity.
     // let d = seckey.negate_if(aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc);
     let d = seckey;
-    if aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc {
-        d.neg();    
-    }
+    // if aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc {     // NOTE: TOOK OUT PARITY CHECK
+    //     d.neg();    
+    // }
     // let nonce_x_bytes = adapted_nonce.serialize_xonly();
-    let nonce_x_bytes = vec![];
-    final_nonce.serialize(nonce_x_bytes);
+    let mut nonce_x_bytes = vec![];
+    final_nonce.serialize(&mut nonce_x_bytes);
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);
     let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message);
@@ -1254,7 +1121,7 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     // NOTE: I THINK USING Y-COORDINATE PARITY IS STILL FINE FOR BLS12-381 BECAUSE
     // POINTS HAVE 2 REPRESENTATIONS FOR POSITIVE AND NEGATIVE Y-COORDINATES STILL APPLY
     // AND THE POINT OF NEGATING IS FOR CONSISTENCY IN GENERATED SIGNATURES ACROSS SIGNERS
-    let secnonce_sum = secnonce.k1 + b * secnonce.k2;
+    let secnonce_sum = secnonce.k1.secret_key + b * secnonce.k2.secret_key;
 
     // NOTE: I'M TAKING OUT THE PARITY CONSISTENCY CHECK BECAUSE WE ONLY HAVE LOG & USER BUT BRING IT BACK IN IF TROUBLE LATER
     // if final_nonce. {       // TODO: where is is_even, is_odd?
@@ -1285,8 +1152,8 @@ pub fn compute_challenge_hash_tweak<S: From<MaybeScalar>>(
     aggregated_pubkey: &Point,
     message: impl AsRef<[u8]>,
 ) -> S {
-    let agg_pubkey_serialized = vec![];
-    aggregated_pubkey.serialize(agg_pubkey_serialized);
+    let mut agg_pubkey_serialized = vec![];
+    aggregated_pubkey.serialize(&mut agg_pubkey_serialized);
     // let agg_pubkey_copy = agg_pubkey_serialized.clone();
     let hash: [u8; 32] = BIP0340_CHALLENGE_TAG_HASHER
         .clone()
@@ -1312,14 +1179,14 @@ pub fn compute_challenge_hash_tweak<S: From<MaybeScalar>>(
 /// `key_agg_ctx`, or if the signature is invalid.
 pub fn verify_partial_adaptor(
     key_agg_ctx: &KeyAggContext,
-    partial_signature: impl Into<PartialSignature>,
+    partial_signature: PartialSignature,
     aggregated_nonce: &AggNonce,
     // adaptor_point: impl Into<MaybePoint>,
     individual_pubkey: impl Into<Point>,
     individual_pubnonce: &PubNonce,
     message: impl AsRef<[u8]>,
 ) -> Result<(), VerifyError> {
-    let partial_signature: MaybeScalar = partial_signature.into();
+    // let partial_signature: MaybeScalar = partial_signature.into();
 
     // As a side-effect, looking up the cached effective key also confirms
     // the individual key is indeed part of the aggregated key.
@@ -1333,28 +1200,28 @@ pub fn verify_partial_adaptor(
     let final_nonce: Point = aggregated_nonce.final_nonce(b);
     // let adapted_nonce = final_nonce + adaptor_point.into();
 
-    let mut effective_nonce = individual_pubnonce.R1 + b * individual_pubnonce.R2;
+    let mut effective_nonce = individual_pubnonce.R1.add(individual_pubnonce.R2.mul(b).into_affine());
 
     // Don't need constant time ops here as adapted_nonce is public.
-    if final_nonce.has_odd_y() {
-        effective_nonce = -effective_nonce;
-    }
+    // if final_nonce.has_odd_y() {         // NOTE: TOOK OUT PARITY CHECK
+    //     effective_nonce = -effective_nonce;
+    // }
 
-    let nonce_x_bytes = vec![];
-    final_nonce.serialize(nonce_x_bytes);
+    let mut nonce_x_bytes = vec![];
+    final_nonce.serialize(&mut nonce_x_bytes);
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
     let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message);
 
     // s * G == R + (g * gacc * e * a * P)
     // let challenge_parity = aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc;
-    let challenge_point = e * effective_pubkey;
+    let challenge_point = effective_pubkey.mul(e).into_affine();
     // if challenge_parity {
     //     challenge_point.neg();
     // }
 
     // TODO: double check G1 or G2
-    if partial_signature * EdwardsProjective::prime_subgroup_generator().into() != effective_nonce + challenge_point {
+    if GroupAffine::prime_subgroup_generator().mul(partial_signature).into_affine() != effective_nonce + challenge_point {
         return Err(VerifyError::BadSignature);
     }
 
@@ -1369,7 +1236,7 @@ pub fn verify_partial_adaptor(
 /// of the `adaptor_point`.
 ///
 /// Returns an error if the resulting signature would not be valid.
-pub fn aggregate_partial_adaptor_signatures<S: Into<Signature<EdwardsProjective>>> (
+pub fn aggregate_partial_adaptor_signatures<S: Into<PartialSignature>> (
     key_agg_ctx: &KeyAggContext,
     aggregated_nonce: &AggNonce,
     // adaptor_point: impl Into<MaybePoint>,
@@ -1382,8 +1249,8 @@ pub fn aggregate_partial_adaptor_signatures<S: Into<Signature<EdwardsProjective>
     let b: MaybeScalar = aggregated_nonce.nonce_coefficient(aggregated_pubkey, &message);
     let final_nonce: Point = aggregated_nonce.final_nonce(b);
     // let adapted_nonce = final_nonce + adaptor_point;
-    let nonce_x_bytes = vec![];
-    final_nonce.serialize(nonce_x_bytes);
+    let mut nonce_x_bytes = vec![];
+    final_nonce.serialize(&mut nonce_x_bytes);
     // NOTE: FOR BLS12-381, X COORDINATE DOESN'T UNIQUELY IDENTIFY THE POINT ON CURVE SO SERIALIZE ENTIRE AFFINE
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
@@ -1391,13 +1258,13 @@ pub fn aggregate_partial_adaptor_signatures<S: Into<Signature<EdwardsProjective>
     let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message);
 
     let elem = e * key_agg_ctx.tweak_acc;
-    if aggregated_pubkey.parity() {
-        elem.neg();
-    }
+    // if aggregated_pubkey.parity() {  // NOTE: TOOK OUT PARITY CHECK
+    //     elem.neg();
+    // }
     let aggregated_signature = partial_signatures
         .into_iter()
         .map(|sig| sig.into())
-        .sum::<Signature<EdwardsProjective>>()
+        .sum::<PartialSignature>()
         + elem;
 
     // let effective_nonce = if final_nonce.has_even_y() {
@@ -1414,7 +1281,7 @@ pub fn aggregate_partial_adaptor_signatures<S: Into<Signature<EdwardsProjective>
 
     let agg_sig = Signature {
         prover_response: aggregated_signature,        // s - scalar representing signature proof
-        verifier_challenge: final_nonce,
+        verifier_challenge: array,      // bytes of finalnonce
     };
 
     Ok(agg_sig)
@@ -1425,26 +1292,26 @@ pub fn aggregate_partial_adaptor_signatures<S: Into<Signature<EdwardsProjective>
 /// key in `key_agg_ctx`.
 ///
 /// Returns an error if the resulting signature would not be valid.
-pub fn aggregate_partial_signatures<S, T>(
+pub fn aggregate_partial_signatures<S>(
     key_agg_ctx: &KeyAggContext,
     aggregated_nonce: &AggNonce,
-    // partial_signatures: impl IntoIterator<Item = S>,
+    partial_signatures: impl IntoIterator<Item = S>,
     message: impl AsRef<[u8]>,
-) -> Result<T, VerifyError>
+) -> Result<Signature<EdwardsProjective>, VerifyError>
 where
     S: Into<PartialSignature>,
-    T: From<LiftedSignature>,
+//     T: From<LiftedSignature>,
 {
     let sig = aggregate_partial_adaptor_signatures(
         key_agg_ctx,
         aggregated_nonce,
-        MaybePoint::Infinity,
-        // partial_signatures,
+        // MaybePoint::Infinity,
+        partial_signatures,
         message,
-    )?
+    )?;
     // .adapt(MaybeScalar::Zero)
-    .map(T::from)
-    .expect("aggregating with empty adaptor should never result in an adaptor failure");
+    // .map(T::from)
+    // .expect("aggregating with empty adaptor should never result in an adaptor failure");
 
     Ok(sig)
 }
