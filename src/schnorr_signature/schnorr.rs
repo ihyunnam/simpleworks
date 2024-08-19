@@ -140,7 +140,7 @@ where
             (random_scalar, verifier_challenge)
         };
 
-        let verifier_challenge_fe = C::ScalarField::from_le_bytes_mod_order(&verifier_challenge);
+        let verifier_challenge_fe = C::ScalarField::from_be_bytes_mod_order(&verifier_challenge);
 
         // k - xe;
         let prover_response = random_scalar - (verifier_challenge_fe * sk.secret_key);
@@ -162,7 +162,7 @@ where
             prover_response,
             verifier_challenge,
         } = signature;
-        let verifier_challenge_fe = C::ScalarField::from_le_bytes_mod_order(verifier_challenge);
+        let verifier_challenge_fe = C::ScalarField::from_be_bytes_mod_order(verifier_challenge);
         // sG = kG - eY
         // kG = sG + eY
         // so we first solve for kG.
@@ -238,12 +238,28 @@ fn compute_key_aggregation_coefficient(
     pubkey: &Point,
     pk2: Option<&Point>,
 ) -> MaybeScalar {
-    // if pk2.is_some_and(|pk2| pubkey == pk2) {
-    //     return MaybeScalar::one();
-    // }
+    if pk2.is_some_and(|pk2| pubkey == pk2) {
+        return MaybeScalar::one();
+    }
 
     let mut bytes = [0u8; 32];
     pubkey.serialize(&mut bytes[..]);
+
+    // let mut bytes = Vec::new();
+    // point.serialize(&mut bytes)?;
+
+    // // Now `bytes` is a Vec<u8> which implements AsRef<[u8]>
+    // println!("Serialized point: {:?}", bytes);
+
+    // // If you need a reference to &[u8]
+    // let bytes_slice: &[u8] = bytes.as_ref();
+
+    // let hash: [u8; 32] = tagged_hashes::KEYAGG_COEFF_TAG_HASHER
+    //     .clone()
+    //     .chain_update(&pk_list_hash)
+    //     .chain_update(&pubkey.serialize())
+    //     .finalize()
+    //     .into();
     
     let hash: [u8; 32] = KEYAGG_COEFF_TAG_HASHER
         .clone()
@@ -253,7 +269,7 @@ fn compute_key_aggregation_coefficient(
         .finalize()
         .into();
 
-    MaybeScalar::from_le_bytes_mod_order(&hash.to_vec())
+    MaybeScalar::from_be_bytes_mod_order(&hash.to_vec())
 }
 
 fn hash_pubkeys<P: std::borrow::Borrow<Point>>(ordered_pubkeys: &[P]) -> [u8; 32] {
@@ -324,8 +340,13 @@ impl KeyAggContext {
         let pk2 = ordered_pubkeys[1..]
             .into_iter()
             .find(|pubkey| pubkey != &&ordered_pubkeys[0]);
+        
+        // println!("pk2 {:?}", pk2);
 
         let pk_list_hash = hash_pubkeys(&ordered_pubkeys);
+        // println!("ORDERED PUBKEYS {:?}", ordered_pubkeys);      // ORDERS ARE CORRECT
+        // println!("ORDERED PUBKEY POINT AT INF? {:?}", ordered_pubkeys[0].is_zero());
+        // println!("ORDERED PUBKEY POINT AT INF? {:?}", ordered_pubkeys[1].is_zero());
 
         // NOTE: THIS DOESN'T CHECK FOR POINTS AT INFINITY. NOT READY FOR PRODUCTION.
         let (effective_pubkeys, key_coefficients): (Vec<Point>, Vec<Fr>) =
@@ -333,14 +354,20 @@ impl KeyAggContext {
                 .iter()
                 .map(|&pubkey| {
                     let key_coeff =
-                        compute_key_aggregation_coefficient(&pk_list_hash, &pubkey, pk2);
+                        compute_key_aggregation_coefficient(&pk_list_hash, &pubkey, pk2);       // pk2 IS LOG PUBKEY
                     (pubkey.mul(key_coeff).into_affine(), key_coeff)
                 })
                 .unzip();
+        println!("EFFECTIVE PUBKEY POINT AT INF? {:?}", effective_pubkeys[0].is_zero());
+        println!("EFFECTIVE PUBKEY POINT AT INF? {:?}", effective_pubkeys[1].is_zero());
+
+        println!("EFFECTIVE PUBKEYS {:?}", effective_pubkeys);
+        println!("KEY COEFFICIENTS {:?}", key_coefficients);
 
         // let aggregated_pubkey = MaybePoint::sum(&effective_pubkeys);
         let aggregated_pubkey = effective_pubkeys.clone().into_iter().fold(GroupAffine::default(), |acc, item| acc + &item);
-
+        // NOTE: ORIGINAL IMPLEMENTATION JUST 'FILTERS OUT' POINTS AT INFINITY BEFORE SUMMING
+        println!("AGGREGATED PUBKEY POINT AT INF? {:?}", aggregated_pubkey.is_zero());
         let pubkey_indexes = HashMap::from_iter(
             ordered_pubkeys
                 .iter()
@@ -348,7 +375,7 @@ impl KeyAggContext {
                 .enumerate()
                 .map(|(i, pk)| (pk, i)),
         );
-
+        // println!("PUBKEY INDEXES? {:?}", pubkey_indexes);
         Ok(KeyAggContext {
             pubkey: aggregated_pubkey,
             ordered_pubkeys,
@@ -356,7 +383,7 @@ impl KeyAggContext {
             key_coefficients,
             effective_pubkeys,
             parity_acc: subtle::Choice::from(0),
-            tweak_acc: Fr::zero(),
+            tweak_acc: MaybeScalar::zero(),     // TODO: check what this does later
         })
     }
 
@@ -370,6 +397,8 @@ impl KeyAggContext {
     }
 }
 
+// TODO: MUST REMOVE DEBUG LATER
+#[derive(Debug)]
 pub struct SecNonce {
     pub(crate) k1: SecretKey<EdwardsProjective>,
     pub(crate) k2: SecretKey<EdwardsProjective>,
@@ -625,13 +654,13 @@ impl<'snb> SecNonceBuilder<'snb> {
         let hash1 = <[u8; 32]>::from(hasher.clone().chain_update(&[0]).finalize());
         let hash2 = <[u8; 32]>::from(hasher.clone().chain_update(&[1]).finalize());
 
-        let k1: MaybeScalar = MaybeScalar::from_le_bytes_mod_order(&hash1);
+        let k1: MaybeScalar = MaybeScalar::from_be_bytes_mod_order(&hash1);
         let k1: MaybeScalar = if k1.is_zero() {
             MaybeScalar::one()
         } else {
             k1
         };
-        let k2: MaybeScalar = MaybeScalar::from_le_bytes_mod_order(&hash2);
+        let k2: MaybeScalar = MaybeScalar::from_be_bytes_mod_order(&hash2);
         let k2: MaybeScalar = if k2.is_zero() {
             MaybeScalar::one()
         } else {
@@ -757,15 +786,17 @@ impl FirstRound {
             .build();
 
         let pubnonce = secnonce.public_nonce();
+        // println!("PUBLIC NONCE COMPUTED INSIDE NEW {:?}", pubnonce);
 
         // let mut pubnonce_slots = Slots::new(key_agg_ctx.ordered_pubkeys.len());
         // pubnonce_slots.place(pubnonce, signer_index).unwrap(); // never fails
 
+        // println!("MY SECNONCE {:?}", secnonce);
         Ok(FirstRound {
             key_agg_ctx,
             secnonce,
             signer_index,
-            // pubnonce_slots,
+            // pubnonce,
         })
     }
 
@@ -808,7 +839,6 @@ impl FirstRound {
         self,
         seckey: SecretKey<EdwardsProjective>,
         // adaptor_point: MaybePoint,
-        // message: M,
         message: M,
         pubnonces: Vec<PubNonce>
     ) -> Result<SecondRound<M>, RoundFinalizeError>
@@ -817,8 +847,12 @@ impl FirstRound {
     {
         // let adaptor_point: MaybePoint = adaptor_point.into();
         // let pubnonces: Vec<PubNonce> = self.pubnonce_slots.finalize()?; // NOT RELATED TO ADAPTOR
-        let aggnonce = pubnonces.iter().sum();
+        let aggnonce_r1 = pubnonces.clone().into_iter().fold(GroupAffine::default(), |acc, item| acc + &item.R1);
+        let aggnonce_r2 = pubnonces.clone().into_iter().fold(GroupAffine::default(), |acc, item| acc + &item.R2);
+        let aggnonce = AggNonce { R1: aggnonce_r1, R2: aggnonce_r2 };
 
+        // let aggnonce = pubnonces.iter().sum();
+        // println!("MY SECNONCE {:?}", self.secnonce);
         let partial_signature = sign_partial_adaptor(
             &self.key_agg_ctx,
             seckey,
@@ -1034,6 +1068,7 @@ impl AggNonce {
         self.R2.serialize(&mut r2_bytes);
         let mut aggregated_pubkey_bytes = vec![];
         aggregated_pubkey.serialize(&mut aggregated_pubkey_bytes);
+        
         let hash: [u8; 32] = MUSIG_NONCECOEF_TAG_HASHER
             .clone()
             .chain_update(&r1_bytes)     // R1 = Point i.e. PublicKey
@@ -1043,7 +1078,7 @@ impl AggNonce {
             .finalize()
             .into();
 
-        S::from(MaybeScalar::from_le_bytes_mod_order(&hash))
+        S::from(MaybeScalar::from_be_bytes_mod_order(&hash))
     }
 
     /// Computes the final public nonce point, published with the aggregated signature.
@@ -1090,11 +1125,11 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
 ) -> Result<T, SigningError> {
     // let adaptor_point: MaybePoint = adaptor_point.into();
     // let seckey: Scalar = seckey.into(); // TODO: JUST EXTRACT THE SCALAR OUT OF SECKEY
-    let pubkey = seckey.public_key;
+    let pubkey = seckey.public_key;     // CORRECTLY RECONSTRUCTS PUBKEY FROM OUTSIDE 
+    // println!("PUBKEY INSIDE SIGN PARTIAL ADAPTOR {:?}", pubkey);
     let seckey = seckey.secret_key;
     // let pubkey = seckey.base_point_mul();
 
-    // NOTE: TOOK OUT CORRECTNESS CHECK
     // As a side-effect, looking up the cached key coefficient also confirms
     // the individual key is indeed part of the aggregated key.
     let key_coeff = key_agg_ctx
@@ -1173,7 +1208,7 @@ pub fn compute_challenge_hash_tweak<S: From<MaybeScalar>>(
         .finalize()
         .into();
 
-    S::from(MaybeScalar::from_le_bytes_mod_order(&hash))
+    S::from(MaybeScalar::from_be_bytes_mod_order(&hash))
 }
 
 
