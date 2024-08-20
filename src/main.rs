@@ -1,6 +1,8 @@
+use ark_ff::PrimeField;
 mod schnorr_signature;
 
 use ark_ec::ProjectiveCurve;
+use ark_ed_on_bls12_381::EdwardsProjective;
 use ark_ff::Field;
 use schnorr_signature::schnorr::*;
 use ark_relations::r1cs::{ConstraintSystem, ConstraintLayer, SynthesisError, ConstraintSynthesizer, ConstraintSystemRef, SynthesisMode, TracingMode::{All, OnlyConstraints}};
@@ -35,7 +37,7 @@ fn main() {
     let msg3 = msg.clone();
     
     /* AGGREGATE SCHNORR ATTEMPT */
-    
+
     let schnorr_param: Parameters<C> = Schnorr::<C>::setup(rng).unwrap();
     
     // log and user both only need one pair
@@ -130,6 +132,15 @@ fn main() {
     let aggregated_pubkey: PublicKey<C> = key_agg_ctx.aggregated_pubkey();
 
     // println!("msg3 {:?}", msg3);    // CORRECT
-    let schnorr_verified = Schnorr::<C>::verify(&schnorr_param, &aggregated_pubkey, &msg3, &last_sig).unwrap();
+    let orig_msg = "wrong msg";
+    let fake_msg: Vec<u8> = orig_msg.as_bytes().to_vec();       // REJECTED AS REQUIRED
+
+    let fake_sig = Signature::<EdwardsProjective> {
+        prover_response: <EdwardsProjective as ProjectiveCurve>::ScalarField::from_be_bytes_mod_order(&[3;32]),
+        verifier_challenge: [4; 32],
+    };             // REJECTED AS REQUIRED
+
+    let fake_agg_pubkey = PublicKey::<EdwardsProjective>::default();        // REJECTED AS REQUIRED
+    let schnorr_verified = Schnorr::<C>::verify(&schnorr_param, &fake_agg_pubkey, &msg3, &last_sig).unwrap();
     println!("SCHNORR VERIFIED OUTSIDE CIRCUIT {:?}", schnorr_verified);
 }
