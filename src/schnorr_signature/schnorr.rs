@@ -1,4 +1,4 @@
-use std::ops::Add;
+use std::ops::{Add, Sub};
 use ark_bls12_377::FrParameters;
 // use subtle::ConstantTimeEq as _;
 use ark_serialize::CanonicalSerialize;
@@ -13,9 +13,9 @@ use std::collections::HashMap;
 
 use sha2::Digest as _;
 use ark_crypto_primitives::{Error, SignatureScheme};
-use ark_ec::{twisted_edwards_extended::GroupAffine, AffineCurve, ProjectiveCurve};
+use ark_ec::{twisted_edwards_extended::GroupAffine, AffineCurve, ProjectiveCurve, TEModelParameters};
 use ark_ff::{
-    bytes::ToBytes, fields::{Field, PrimeField}, to_bytes, Fp256, FpParameters, ToConstraintField, UniformRand
+    bytes::ToBytes, fields::{Field, PrimeField}, to_bytes, BigInteger256, Fp256, FpParameters, ToConstraintField, UniformRand
 };
 use ark_std::io::{Result as IoResult, Write};
 use ark_std::rand::Rng;
@@ -162,44 +162,28 @@ where
             prover_response,    // s
             verifier_challenge, // rx
         } = signature;
-        let verifier_challenge_fe = C::ScalarField::from_be_bytes_mod_order(verifier_challenge);    // e
+        // let verifier_challenge_fe = C::ScalarField::from_be_bytes_mod_order(verifier_challenge);    // e
         // sG = kG - eY
         // kG = sG + eY
         // so we first solve for kG.
 
-        let e: MaybeScalar = compute_challenge_hash_tweak(&verifier_challenge, &pk, message);
-
+        /* THIS IS compute_challenge_hash_tweak() */
         let mut agg_pubkey_serialized = vec![];
         pk.serialize(&mut agg_pubkey_serialized);
+        let mut bytes = [0u8; 32];
+        pk.serialize(&mut bytes[..]);
 
         let mut hash_input = Vec::new();
         hash_input.extend_from_slice(verifier_challenge);
-        hash_input.extend_from_slice(agg_pubkey_serialized.as_slice());
-        hash_input.extend_from_slice(message);
+        hash_input.extend_from_slice(&bytes);
+        hash_input.extend_from_slice(message.as_ref());
 
-        let obtained_verifier_challenge = &*Blake2s::digest(&hash_input);
+        let hash = Blake2s::digest(&hash_input);
+        let e = C::ScalarField::from_be_bytes_mod_order(&hash);
 
-        // pub fn compute_challenge_hash_tweak<S: From<MaybeScalar>>(
-        //     final_nonce_xonly: &[u8; 32],        // verifier_challenge
-        //     aggregated_pubkey: &Point,           // pk
-        //     message: impl AsRef<[u8]>,           // message
-        // ) -> S {
-        //     let mut agg_pubkey_serialized = vec![];
-        //     aggregated_pubkey.serialize(&mut agg_pubkey_serialized);
-        //     // let agg_pubkey_copy = agg_pubkey_serialized.clone();
-        //     let hash: [u8; 32] = BIP0340_CHALLENGE_TAG_HASHER
-        //         .clone()
-        //         .chain_update(final_nonce_xonly)
-        //         .chain_update(&agg_pubkey_serialized)
-        //         .chain_update(message.as_ref())
-        //         .finalize()
-        //         .into();
+        // let obtained_verifier_challenge = &*Blake2s::digest(&hash_input);
         
-        //     S::from(MaybeScalar::from_be_bytes_mod_order(&hash))
-        // }
-
-        
-        let verification_point = C::prime_subgroup_generator().into().mul(prover_response) - pk.mul(e);
+        let verification_point = C::prime_subgroup_generator().into_affine().mul(*prover_response).sub(pk.mul(e)).into_affine();
         let mut verification_point_bytes = vec![];
         verification_point.serialize(&mut verification_point_bytes);
         // let mut claimed_prover_commitment = parameters.generator.mul(*prover_response); // s*G
@@ -258,14 +242,14 @@ pub fn bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
     bits
 }
 
-impl<ConstraintF: Field, C: ProjectiveCurve + ToConstraintField<ConstraintF>>
-    ToConstraintField<ConstraintF> for Parameters<C>
-{
-    #[inline]
-    fn to_field_elements(&self) -> Option<Vec<ConstraintF>> {
-        self.generator.into_projective().to_field_elements()
-    }
-}
+// impl<ConstraintF: Field, C: ProjectiveCurve + ToConstraintField<ConstraintF>>
+//     ToConstraintField<ConstraintF> for Parameters<C>
+// {
+//     #[inline]
+//     fn to_field_elements(&self) -> Option<Vec<ConstraintF>> {
+//         self.generator.into_projective().to_field_elements()
+//     }
+// }
 
 /* MUSIG2 IMPLEMENTED BY IHYUN. SOURCE: https://github.com/conduition/musig2.git. 
     HARDCODED FOR BLS12-381. */
@@ -460,8 +444,8 @@ impl SecNonce {
     // generator in pubkey generation = C::prime_subgroup_generator().into()
     pub fn public_nonce(&self) -> PubNonce {
         PubNonce {
-            R1: EdwardsProjective::prime_subgroup_generator().mul(self.k1.secret_key).into_affine(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-381.
-            R2: EdwardsProjective::prime_subgroup_generator().mul(self.k2.secret_key).into_affine(),
+            R1: EdwardsProjective::prime_subgroup_generator().into_affine().mul(self.k1.secret_key).into_affine(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-381.
+            R2: EdwardsProjective::prime_subgroup_generator().into_affine().mul(self.k2.secret_key).into_affine(),
         }
     }
 }
@@ -1231,22 +1215,34 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
 /// Computes the challenge hash `e` for for a signature. You probably don't need
 /// to call this directly. Instead use [`sign_solo`][crate::sign_solo] or
 /// [`sign_partial`][crate::sign_partial].
-pub fn compute_challenge_hash_tweak<S: From<MaybeScalar>>(
+pub fn compute_challenge_hash_tweak<S>(
     final_nonce_xonly: &[u8; 32],
     aggregated_pubkey: &Point,
     message: impl AsRef<[u8]>,
-) -> S {
+) -> S 
+where
+    S: From<MaybeScalar>,
+    // C: ProjectiveCurve,
+    {
     let mut agg_pubkey_serialized = vec![];
     aggregated_pubkey.serialize(&mut agg_pubkey_serialized);
+    let mut bytes = [0u8; 32];
+    aggregated_pubkey.serialize(&mut bytes[..]);
     // let agg_pubkey_copy = agg_pubkey_serialized.clone();
-    let hash: [u8; 32] = BIP0340_CHALLENGE_TAG_HASHER
-        .clone()
-        .chain_update(final_nonce_xonly)
-        .chain_update(&agg_pubkey_serialized)
-        .chain_update(message.as_ref())
-        .finalize()
-        .into();
+    // let hash: [u8; 32] = BIP0340_CHALLENGE_TAG_HASHER
+    //     .clone()
+    //     .chain_update(final_nonce_xonly)
+    //     .chain_update(&agg_pubkey_serialized)
+    //     .chain_update(message.as_ref())
+    //     .finalize()
+    //     .into();
 
+    let mut hash_input = Vec::new();
+    hash_input.extend_from_slice(final_nonce_xonly);
+    hash_input.extend_from_slice(&bytes);
+    hash_input.extend_from_slice(message.as_ref());
+
+    let hash = Blake2s::digest(&hash_input);
     S::from(MaybeScalar::from_be_bytes_mod_order(&hash))
 }
 
@@ -1310,7 +1306,7 @@ pub fn verify_partial_adaptor(
     // }
 
     // TODO: double check G1 or G2
-    if GroupAffine::prime_subgroup_generator().mul(partial_signature).into_affine() != effective_nonce + challenge_point {
+    if EdwardsProjective::prime_subgroup_generator().into_affine().mul(partial_signature).into_affine() != effective_nonce + challenge_point {
         return Err(VerifyError::BadSignature);
     }
 
