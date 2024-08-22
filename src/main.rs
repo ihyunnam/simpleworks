@@ -144,6 +144,6 @@ fn main() {
     };             // REJECTED AS REQUIRED
 
     let fake_agg_pubkey = PublicKey::<EdwardsProjective>::default();        // REJECTED AS REQUIRED
-    let schnorr_verified = Schnorr::<C>::verify(&schnorr_param, &fake_agg_pubkey, &msg3, &last_sig).unwrap();
+    let schnorr_verified = Schnorr::<C>::verify(&schnorr_param, &aggregated_pubkey, &msg3, &last_sig).unwrap();
     println!("SCHNORR VERIFIED OUTSIDE CIRCUIT {:?}", schnorr_verified);
 }

@@ -45,61 +45,34 @@ where
         message: &[UInt8<ConstraintF<C>>],
         signature: &Self::SignatureVar,
     ) -> Result<Boolean<ConstraintF<C>>, SynthesisError> {
-        // let prover_response = signature.prover_response.clone();
-        // let verifier_challenge = signature.verifier_challenge.clone();
+        let prover_response = signature.prover_response.clone();
+        let verifier_challenge = signature.verifier_challenge.clone();
 
-        // let mut hash_input = Vec::new();
-        // hash_input.extend_from_slice(&verifier_challenge);
-        // hash_input.extend_from_slice(&public_key.pub_key.to_bytes()?);
-        // hash_input.extend_from_slice(message);
-
-        // let b2s_params = <Blake2sParametersVar as AllocVar<_, ConstraintF<C>>>::new_constant(
-        //     ConstraintSystemRef::None,
-        //     (),
-        // )?;
-
-        // // TODO: ROGadget to Poseidon?
-        // let hash = ROGadget::evaluate(&b2s_params, &hash_input)?.0;
-
-        // let verification_point = parameters.generator.scalar_mul_le(prover_response.to_bits_le()?.iter())?
-        //         .sub(public_key
-        //             .pub_key
-        //             .scalar_mul_le(hash.to_bits_le()?.iter())?);
-        
-        // verification_point.to_bytes()?.is_eq(&verifier_challenge.to_vec())
-        // verification_point.into_repr();
-        // C::ScalarField::from_be_bytes_mod_order(verifier_challenge.to_bytes()?);
-
-        /* GPT */
-
-        let prover_response = &signature.prover_response;
-        let verifier_challenge = &signature.verifier_challenge;
-
-        // Construct the hash input from the verifier challenge, public key, and message
         let mut hash_input = Vec::new();
-        hash_input.extend_from_slice(verifier_challenge);
+        hash_input.extend_from_slice(&verifier_challenge);
         hash_input.extend_from_slice(&public_key.pub_key.to_bytes()?);
         hash_input.extend_from_slice(message);
 
-        // Instantiate the Blake2s hash parameters
         let b2s_params = <Blake2sParametersVar as AllocVar<_, ConstraintF<C>>>::new_constant(
             ConstraintSystemRef::None,
             (),
         )?;
 
-        // Compute the hash using a hash gadget (e.g., Blake2sGadget)
+        // TODO: ROGadget to Poseidon?
         let hash = ROGadget::evaluate(&b2s_params, &hash_input)?.0;
 
-        // Convert the hash output to a scalar field element
-        // let e = C::ScalarField::from_le_bytes_mod_order(hash.to_bytes()?);
-
-        // Compute the verification point R = sG - eY
-        let sG = parameters.generator.scalar_mul_le(prover_response.to_bits_le()?.iter())?;
-        let eY = public_key.pub_key.scalar_mul_le(hash.to_bits_le()?.iter())?;
-        let R = sG.sub(&eY);
-
-        // Serialize R and compare it with the original challenge
-        let R_bytes = R.to_bytes()?;
-        R_bytes.is_eq(&verifier_challenge.to_bytes()?)
+        let verification_point = parameters.generator.scalar_mul_le(prover_response.to_bits_le()?.iter())?
+                .sub(public_key
+                    .pub_key
+                    .scalar_mul_le(hash.to_bits_le()?.iter())?);
+        
+        let mut vector_affine = vec![];
+        let verification_point_affine = verification_point.value().unwrap_or(C::default()).into_affine();
+        verification_point_affine.serialize(&mut vector_affine);
+        let mut vector_var = vec![];
+        for coord in vector_affine {
+            vector_var.push(UInt8::new_variable(ConstraintSystemRef::None, || Ok(coord), AllocationMode::Constant).unwrap());
+        }
+        vector_var.is_eq(&verifier_challenge.to_vec())
     }
 }
