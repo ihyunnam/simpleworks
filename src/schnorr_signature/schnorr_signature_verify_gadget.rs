@@ -153,6 +153,6 @@ where
         for coord in vector_affine {
             vector_var.push(UInt8::new_variable(ConstraintSystemRef::None, || Ok(coord), AllocationMode::Constant).unwrap());
         }
-        vector_var.to_bytes()?.is_eq(&verifier_challenge.to_vec())
+        vector_var.is_eq(&verifier_challenge.to_vec())
     }
 }
