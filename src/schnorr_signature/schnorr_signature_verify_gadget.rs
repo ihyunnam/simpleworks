@@ -84,10 +84,11 @@ where
         let hash = ROGadget::evaluate(&b2s_params, &hash_var)?.0;
 
         // println!("HASH VALUE {:?}", hash.value().unwrap());  // SAME
-
+        // let hello =  parameters.generator.value().unwrap
+        // let hello = public_key.pub_key.value().unwrap();
         let e = C::ScalarField::from_be_bytes_mod_order(&hash.value().unwrap());
         // let hello = public_key.pub_key.value().unwrap();
-        let verification_point = parameters.generator.value().unwrap().into_affine().mul(prover_response_fe).sub(public_key.pub_key.value().unwrap().into_affine().mul(e)).into_affine();
+        let verification_point = parameters.generator.value().unwrap_or(C::default()).into_affine().mul(prover_response_fe).sub(public_key.pub_key.value().unwrap_or(C::default()).into_affine().mul(e)).into_affine();
         // let verification_point = parameters.generator.scalar_mul_le(prover_response.value().unwrap())
         let mut verification_point_bytes = vec![];
         verification_point.serialize(&mut verification_point_bytes);
