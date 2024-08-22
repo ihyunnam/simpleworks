@@ -108,6 +108,7 @@ where
         ))
     }
     
+    /* NOT USED */
     fn sign<R: Rng>(
         parameters: &Self::Parameters,
         sk: &Self::SecretKey,
@@ -168,14 +169,14 @@ where
         // so we first solve for kG.
 
         /* THIS IS compute_challenge_hash_tweak() */
-        let mut agg_pubkey_serialized = vec![];
-        pk.serialize(&mut agg_pubkey_serialized);
-        let mut bytes = [0u8; 32];
-        pk.serialize(&mut bytes[..]);
+        let mut agg_pubkey_serialized = [0u8; 32];
+        pk.serialize(&mut agg_pubkey_serialized[..]);
+        // let mut bytes = [0u8; 32];
+        // pk.serialize(&mut bytes[..]);
 
         let mut hash_input = Vec::new();
         hash_input.extend_from_slice(verifier_challenge);
-        hash_input.extend_from_slice(&bytes);
+        hash_input.extend_from_slice(&agg_pubkey_serialized);
         hash_input.extend_from_slice(message.as_ref());
 
         let hash = Blake2s::digest(&hash_input);
@@ -183,7 +184,7 @@ where
 
         // let obtained_verifier_challenge = &*Blake2s::digest(&hash_input);
         
-        let verification_point = C::prime_subgroup_generator().into_affine().mul(*prover_response).sub(pk.mul(e)).into_affine();
+        let verification_point = parameters.generator.mul(*prover_response).sub(pk.mul(e)).into_affine();
         let mut verification_point_bytes = vec![];
         verification_point.serialize(&mut verification_point_bytes);
         // let mut claimed_prover_commitment = parameters.generator.mul(*prover_response); // s*G
@@ -532,12 +533,12 @@ impl<'snb> SecNonceBuilder<'snb> {
 
     /// Salt the resulting nonce with the message which we expect to be signing with
     /// the nonce.
-    pub fn with_message<M: AsRef<[u8]>>(self, msg: &'snb M) -> SecNonceBuilder<'snb> {
-        SecNonceBuilder {
-            message: Some(msg.as_ref()),
-            ..self
-        }
-    }
+    // pub fn with_message<M: AsRef<[u8]>>(self, msg: &'snb M) -> SecNonceBuilder<'snb> {
+    //     SecNonceBuilder {
+    //         message: Some(msg.as_ref()),
+    //         ..self
+    //     }
+    // }
 
     /// Salt the resulting nonce with the aggregated public key which we expect to aggregate
     /// signatures for.
