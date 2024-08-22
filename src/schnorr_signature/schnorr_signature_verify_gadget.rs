@@ -49,26 +49,25 @@ where
     ) -> Result<Boolean<ConstraintF<C>>, SynthesisError> {
         let prover_response = signature.prover_response.clone();
         let verifier_challenge = signature.verifier_challenge.clone();
-
-        let pubkey_affine = public_key.pub_key.value().unwrap().into_affine();
+        
+        let pubkey_affine = public_key.pub_key.value().unwrap_or(C::default()).into_affine();
         let mut agg_pubkey_serialized = [0u8; 32];
         pubkey_affine.serialize(&mut agg_pubkey_serialized[..]);
         // let hello = prover_response.value().unwrap();
-        println!("PROVER RESPONSE IN GADGET {:?}", prover_response.value().unwrap());
-        println!("VERIFIER CHALLENGE IN GADGET {:?}", verifier_challenge.value().unwrap());
+        // println!("PROVER RESPONSE IN GADGET {:?}", prover_response.value().unwrap());
+        // println!("VERIFIER CHALLENGE IN GADGET {:?}", verifier_challenge.value().unwrap());
         // println!("VERIFIER CHALLENGE AS SLICE {:?}", verifier_challenge.as_slice().value().unwrap());   // SAME AS VERIFIER CHALLENGE
 
-        let mut reader = Cursor::new(prover_response.value().unwrap());
+        let mut reader = Cursor::new(prover_response.value().unwrap_or(vec![]));
 
         // Deserialize the bytes back into an affine point
         let prover_response_fe = C::ScalarField::deserialize(&mut reader).unwrap();
         
         let mut hash_input = Vec::new();
-
-
-        hash_input.extend_from_slice(&verifier_challenge.value().unwrap());
+// let hasdf = verifier_challenge.value();
+        hash_input.extend_from_slice(&verifier_challenge.value().unwrap_or(vec![]));
         hash_input.extend_from_slice(&agg_pubkey_serialized);
-        hash_input.extend_from_slice(&message.value().unwrap());
+        hash_input.extend_from_slice(&message.value().unwrap_or(vec![]));
 
         let mut hash_var: Vec<UInt8<ConstraintF<C>>> = vec![];
         for coord in hash_input {
@@ -92,8 +91,8 @@ where
         // let verification_point = parameters.generator.scalar_mul_le(prover_response.value().unwrap())
         let mut verification_point_bytes = vec![];
         verification_point.serialize(&mut verification_point_bytes);
-        println!("VERIFICATION POINT BYTES {:?}", verification_point_bytes);    // DIFFERENT
-        println!("PARAMETER GENERATOR {:?}", parameters.generator.value().unwrap().into_affine());
+        // println!("VERIFICATION POINT BYTES {:?}", verification_point_bytes);    // DIFFERENT
+        // println!("PARAMETER GENERATOR {:?}", parameters.generator.value().unwrap().into_affine());
         let mut verification_point_var = vec![];
         for coord in verification_point_bytes {
             verification_point_var.push(UInt8::new_variable(ConstraintSystemRef::None, || Ok(coord), AllocationMode::Constant).unwrap());
