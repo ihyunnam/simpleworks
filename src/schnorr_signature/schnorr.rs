@@ -207,6 +207,8 @@ where
         // The signature is valid iff the computed verifier challenge is the same as the one
         // provided in the signature
         // Ok(verifier_challenge == obtained_verifier_challenge)
+        // println!("VERIFICATION POINT BYTES LENGTH {:?}", verification_point_bytes.len());
+        // println!("verifier_challenge LENGTH {:?}", verifier_challenge.len());
         Ok(verification_point_bytes == verifier_challenge)
     }
 

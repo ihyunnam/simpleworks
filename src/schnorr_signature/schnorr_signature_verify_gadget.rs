@@ -17,6 +17,7 @@ use ark_r1cs_std::{
 };
 use ark_relations::r1cs::{ConstraintSystemRef, SynthesisError};
 use std::marker::PhantomData;
+use ark_serialize::CanonicalSerialize;
 
 pub struct SchnorrSignatureVerifyGadget<C: ProjectiveCurve, GC: CurveVar<C, ConstraintF<C>>>
 where
@@ -145,6 +146,13 @@ where
         // };
         println!("FAIL HERE?");
 
-        verification_point.to_bytes()?.is_eq(&verifier_challenge.to_vec())
+        let verification_point_affine = verification_point.value()?.into_affine();
+        let mut vector_affine = vec![];
+        verification_point_affine.serialize_uncompressed(&mut vector_affine);
+        let mut vector_var = vec![];
+        for coord in vector_affine {
+            vector_var.push(UInt8::new_variable(ConstraintSystemRef::None, || Ok(coord), AllocationMode::Constant).unwrap());
+        }
+        vector_var.to_bytes()?.is_eq(&verifier_challenge.to_vec())
     }
 }
