@@ -171,8 +171,6 @@ where
         /* THIS IS compute_challenge_hash_tweak() */
         let mut agg_pubkey_serialized = [0u8; 32];
         pk.serialize(&mut agg_pubkey_serialized[..]);
-        // let mut bytes = [0u8; 32];
-        // pk.serialize(&mut bytes[..]);
 
         let mut hash_input = Vec::new();
         hash_input.extend_from_slice(verifier_challenge);
@@ -181,34 +179,11 @@ where
 
         let hash = Blake2s::digest(&hash_input);
         let e = C::ScalarField::from_be_bytes_mod_order(&hash);
-
-        // let obtained_verifier_challenge = &*Blake2s::digest(&hash_input);
         
         let verification_point = parameters.generator.mul(*prover_response).sub(pk.mul(e)).into_affine();
         let mut verification_point_bytes = vec![];
         verification_point.serialize(&mut verification_point_bytes);
-        // let mut claimed_prover_commitment = parameters.generator.mul(*prover_response); // s*G
-        // let public_key_times_verifier_challenge = pk.mul(verifier_challenge_fe);    //e*pubkey
-        // claimed_prover_commitment += &public_key_times_verifier_challenge;  // s*G + e*pubkey
-        // let claimed_prover_commitment = claimed_prover_commitment.into_affine();
 
-        // // e = H(salt, kG, msg)
-        // let mut hash_input = Vec::new();
-        // if let Some(salt) = parameters.salt {
-        //     hash_input.extend_from_slice(&salt);
-        // }
-        // hash_input.extend_from_slice(&to_bytes![pk]?);
-        // hash_input.extend_from_slice(&to_bytes![claimed_prover_commitment]?);
-        // hash_input.extend_from_slice(message);
-
-        // cast the hash output to get e
-        // let obtained_verifier_challenge = &*Blake2s::digest(&hash_input);
-
-        // The signature is valid iff the computed verifier challenge is the same as the one
-        // provided in the signature
-        // Ok(verifier_challenge == obtained_verifier_challenge)
-        // println!("VERIFICATION POINT BYTES LENGTH {:?}", verification_point_bytes.len());
-        // println!("verifier_challenge LENGTH {:?}", verifier_challenge.len());
         Ok(verification_point_bytes == verifier_challenge)
     }
 
