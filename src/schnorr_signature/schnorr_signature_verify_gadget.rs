@@ -58,7 +58,7 @@ where
         // println!("VERIFIER CHALLENGE IN GADGET {:?}", verifier_challenge.value().unwrap());
         // println!("VERIFIER CHALLENGE AS SLICE {:?}", verifier_challenge.as_slice().value().unwrap());   // SAME AS VERIFIER CHALLENGE
 
-        let mut reader = Cursor::new(Vec::new());
+        let mut reader = Cursor::new(prover_response.value().unwrap_or([0u8;32].to_vec()));
 
         // Deserialize the bytes back into an affine point
         let prover_response_fe = C::ScalarField::deserialize(&mut reader).unwrap();
