@@ -145,6 +145,6 @@ where
         // };
         println!("FAIL HERE?");
 
-        verification_point.to_bytes()?.is_eq(&verifier_challenge.to_bytes()?)
+        verification_point.to_bytes()?.is_eq(&verifier_challenge.to_vec())
     }
 }

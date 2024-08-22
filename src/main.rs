@@ -38,7 +38,10 @@ fn main() {
     
     /* AGGREGATE SCHNORR ATTEMPT */
 
-    let schnorr_param: Parameters<C> = Schnorr::<C>::setup(rng).unwrap();
+    let schnorr_param = Parameters::<C> {
+        generator: C::prime_subgroup_generator().into(),
+        salt: Some([0u8;32]),
+    };
     
     // log and user both only need one pair
     // let (schnorr_pk, schnorr_sk) = Schnorr::<C>::keygen(&schnorr_param, rng).unwrap();
