@@ -1,10 +1,21 @@
+use ark_r1cs_std::{eq::EqGadget, R1CSVar};
+use ark_crypto_primitives::signature::SigVerifyGadget;
+use ark_r1cs_std::{alloc::{AllocVar, AllocationMode}, prelude::Boolean, uint8::UInt8};
 use ark_ff::PrimeField;
 mod schnorr_signature;
+
+use schnorr_signature::
+    {schnorr::{Schnorr, Parameters, PublicKey, Signature, KeyAggContext, FirstRound, SecondRound, PubNonce, PartialSignature},
+    schnorr_signature_verify_gadget::SchnorrSignatureVerifyGadget,
+    public_key_var::PublicKeyVar,
+    parameters_var::ParametersVar,
+    signature_var::SignatureVar,
+};
 
 use ark_ec::ProjectiveCurve;
 use ark_ed_on_bls12_381::EdwardsProjective;
 use ark_ff::Field;
-use schnorr_signature::schnorr::*;
+// use schnorr_signature::schnorr::*;
 use ark_relations::r1cs::{ConstraintSystem, ConstraintLayer, SynthesisError, ConstraintSynthesizer, ConstraintSystemRef, SynthesisMode, TracingMode::{All, OnlyConstraints}};
 use ark_ed_on_bls12_381::{constraints::EdwardsVar, EdwardsProjective as JubJub};   // Fq2: finite field, JubJub: curve group
 use ark_crypto_primitives::{
@@ -121,6 +132,7 @@ fn main() {
         .collect();
 
     let last_sig = signatures.pop().unwrap();
+    // println!("VERIFIER CHALLENGE OUTSIDE CIRCUIT {:?}", last_sig.verifier_challenge);
 
     // println!("PROVER RESPONSE {:?}", last_sig.prover_response);
     // println!("VERIFIER CHALLENGE {:?}", last_sig.verifier_challenge);
@@ -146,4 +158,33 @@ fn main() {
     let fake_agg_pubkey = PublicKey::<EdwardsProjective>::default();        // REJECTED AS REQUIRED
     let schnorr_verified = Schnorr::<C>::verify(&schnorr_param, &aggregated_pubkey, &msg3, &last_sig).unwrap();
     println!("SCHNORR VERIFIED OUTSIDE CIRCUIT {:?}", schnorr_verified);
+
+    let cs: ConstraintSystemRef<ConstraintF<C>> = ConstraintSystem::new_ref();
+    let reconstructed_msg_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
+        cs.clone(),
+        &msg3
+    ).unwrap();
+    
+    let schnorr_param = ParametersVar::<C,GG>::new_variable(
+        cs.clone(),
+        || Ok(schnorr_param),
+        AllocationMode::Constant,
+    ).unwrap();
+    
+    let schnorr_sig = SignatureVar::<C,GG>::new_variable(
+        cs.clone(),
+        || Ok(last_sig),
+        AllocationMode::Witness,
+    ).unwrap();
+
+    let default_pubkey = PublicKey::<C>::default();
+    let schnorr_apk = PublicKeyVar::<C,GG>::new_variable(
+        cs.clone(),
+        || Ok(aggregated_pubkey),
+        AllocationMode::Witness,
+    ).unwrap();
+
+    let schnorr_verified = SchnorrSignatureVerifyGadget::<C,GG>::verify(&schnorr_param, &schnorr_apk, &reconstructed_msg_wtns, &schnorr_sig).unwrap();
+    println!("schnorr verified inside circuit {:?}", schnorr_verified.value());
+    schnorr_verified.is_eq(&Boolean::TRUE);
 }

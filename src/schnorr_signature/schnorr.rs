@@ -168,21 +168,30 @@ where
         // kG = sG + eY
         // so we first solve for kG.
 
+        println!("PROVER RESPONSE {:?}", prover_response);
+        println!("VERIFIER CHALLENGE {:?}", verifier_challenge);
         /* THIS IS compute_challenge_hash_tweak() */
         let mut agg_pubkey_serialized = [0u8; 32];
         pk.serialize(&mut agg_pubkey_serialized[..]);
+
+        // println!("PK SERIALIZED {:?}", agg_pubkey_serialized);
 
         let mut hash_input = Vec::new();
         hash_input.extend_from_slice(verifier_challenge);
         hash_input.extend_from_slice(&agg_pubkey_serialized);
         hash_input.extend_from_slice(message.as_ref());
-
+        // println!("HASH INPUT {:?}", hash_input);
+// let hello = parameters.generator;
         let hash = Blake2s::digest(&hash_input);
+        // println!("HASH VALUE {:?}", hash);
         let e = C::ScalarField::from_be_bytes_mod_order(&hash);
         
+        println!("GENERATOR {:?}", parameters.generator);
         let verification_point = parameters.generator.mul(*prover_response).sub(pk.mul(e)).into_affine();
         let mut verification_point_bytes = vec![];
         verification_point.serialize(&mut verification_point_bytes);
+
+        println!("VERIFICATION POINT BYTES {:?}", verification_point_bytes);
 
         Ok(verification_point_bytes == verifier_challenge)
     }
