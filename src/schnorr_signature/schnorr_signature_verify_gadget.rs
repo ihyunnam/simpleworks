@@ -143,7 +143,8 @@ where
         //         AllocationMode::Constant,
         //     ).unwrap())
         // };
+        println!("FAIL HERE?");
 
-        verification_point.to_bytes()?.is_eq(&verifier_challenge)
+        verification_point.to_bytes()?.is_eq(&verifier_challenge.to_bytes()?)
     }
 }
