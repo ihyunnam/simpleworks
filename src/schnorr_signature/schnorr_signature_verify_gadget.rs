@@ -32,7 +32,7 @@ where
 impl<C, GC> SigVerifyGadget<Schnorr<C>, ConstraintF<C>> for SchnorrSignatureVerifyGadget<C, GC>
 where
     C: ProjectiveCurve,
-    GC: CurveVar<C, ConstraintF<C>> + PrimeField,
+    GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
     type ParametersVar = ParametersVar<C, GC>;
