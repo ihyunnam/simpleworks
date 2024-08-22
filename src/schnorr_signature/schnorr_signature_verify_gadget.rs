@@ -72,7 +72,9 @@ where
         let mut vector_var = vec![];
         for coord in vector_affine {
             vector_var.push(UInt8::new_variable(ConstraintSystemRef::None, || Ok(coord), AllocationMode::Constant).unwrap());
+            println!("VECTOR VAR VALUE {:?}", coord);
         }
+        println!("VERIFIER CHALLENGE {:?}", verifier_challenge);
         vector_var.is_eq(&verifier_challenge.to_vec())
     }
 }
