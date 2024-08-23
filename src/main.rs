@@ -13,11 +13,11 @@ use schnorr_signature::
 };
 
 use ark_ec::ProjectiveCurve;
-use ark_ed_on_bls12_381::EdwardsProjective;
+use ark_ed_on_bls12_377::EdwardsProjective;
 use ark_ff::Field;
 // use schnorr_signature::schnorr::*;
 use ark_relations::r1cs::{ConstraintSystem, ConstraintLayer, SynthesisError, ConstraintSynthesizer, ConstraintSystemRef, SynthesisMode, TracingMode::{All, OnlyConstraints}};
-use ark_ed_on_bls12_381::{constraints::EdwardsVar, EdwardsProjective as JubJub};   // Fq2: finite field, JubJub: curve group
+use ark_ed_on_bls12_377::{constraints::EdwardsVar, EdwardsProjective as JubJub};   // Fq2: finite field, JubJub: curve group
 use ark_crypto_primitives::{
     commitment::{blake2s::{constraints::{CommGadget, RandomnessVar as CommitRandomnessVar}, Commitment},
         CommitmentGadget, CommitmentScheme},

@@ -3,8 +3,8 @@ use ark_bls12_377::FrParameters;
 // use subtle::ConstantTimeEq as _;
 use ark_serialize::CanonicalSerialize;
 // use serde::Serialize;
-use ark_ed_on_bls12_381::{EdwardsProjective, EdwardsParameters};
-use ark_bls12_381::G1Projective;
+use ark_ed_on_bls12_377::{EdwardsProjective, EdwardsParameters};
+use ark_bls12_377::G1Projective;
 use subtle::Choice;
 
 // type C = EdwardsProjective;
@@ -186,7 +186,7 @@ where
         // println!("HASH VALUE {:?}", hash);
         let e = C::ScalarField::from_be_bytes_mod_order(&hash);
         
-        println!("GENERATOR {:?}", parameters.generator);
+        // println!("GENERATOR :?}")
         let verification_point = parameters.generator.mul(*prover_response).sub(pk.mul(e)).into_affine();
         let mut verification_point_bytes = vec![];
         verification_point.serialize(&mut verification_point_bytes);
