@@ -109,8 +109,8 @@ where
 
 //         println!("verification_point_var {:?}", verification_point_var.value());
 
-        // verification_point_var.is_eq(verifier_challenge.as_slice())
-        Ok(ark_r1cs_std::prelude::Boolean::Constant(true))
+        verification_point_var.is_eq(verifier_challenge.as_slice())
+        // Ok(ark_r1cs_std::prelude::Boolean::Constant(true))
 
     }
 }
