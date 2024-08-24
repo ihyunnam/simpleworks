@@ -88,18 +88,26 @@ where
         // let hello =  parameters.generator.value().unwrap
         // let hello = public_key.pub_key.value().unwrap();
         let e = C::ScalarField::from_be_bytes_mod_order(&hash.value().unwrap());
+        println!("E VALUE {:?}", e);
+
         // let hello = public_key.pub_key.value().unwrap();
         let verification_point = parameters.generator.value().unwrap_or(C::default()).into_affine().mul(prover_response_fe).sub(public_key.pub_key.value().unwrap_or(C::default()).into_affine().mul(e)).into_affine();
+        println!("verification_point {:?}", verification_point);
+
         // let verification_point = parameters.generator.scalar_mul_le(prover_response.value().unwrap())
         let mut verification_point_bytes = vec![];
         verification_point.serialize(&mut verification_point_bytes);
         // println!("VERIFICATION POINT BYTES {:?}", verification_point_bytes);    // DIFFERENT
         // println!("PARAMETER GENERATOR {:?}", parameters.generator.value().unwrap().into_affine());
+
+        println!("verification_point_bytes {:?}", verification_point_bytes);
         let mut verification_point_var = vec![];
         for coord in verification_point_bytes {
             verification_point_var.push(UInt8::new_variable(ConstraintSystemRef::None, || Ok(coord), AllocationMode::Constant).unwrap());
             // println!("VECTOR VAR VALUE {:?}", coord);
         }
+
+        println!("verification_point_var {:?}", verification_point_var.value());
 
         verification_point_var.is_eq(verifier_challenge.as_slice())
 
