@@ -1,3 +1,4 @@
+use ark_crypto_primitives::SignatureScheme;
 use ark_marlin::ahp::verifier;
 use ark_r1cs_std::{alloc::AllocationMode, R1CSVar};
 use super::{
@@ -8,8 +9,9 @@ use super::{
     signature_var::SignatureVar,
     Blake2sParametersVar, ConstraintF,
 };
-use ark_ff::{bytes, BigInteger, FromBytes, PrimeField};
-use ark_crypto_primitives::signature::SigVerifyGadget;
+use ark_bls12_381::{Bls12_381 as E, Fr};
+use ark_ff::{bytes, BigInteger, Field, FromBytes, PrimeField};
+// use ark_crypto_primitives::signature::SigVerifyGadget;
 use ark_ec::{ProjectiveCurve, AffineCurve};
 use ark_r1cs_std::{ToBitsGadget, ToBytesGadget};
 use ark_r1cs_std::{
@@ -19,6 +21,20 @@ use ark_r1cs_std::{
 use ark_relations::r1cs::{ConstraintSystemRef, SynthesisError};
 use std::{io::Cursor, marker::PhantomData};
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
+
+pub trait SigVerifyGadget<S: SignatureScheme, CF: Field> {
+    type ParametersVar;
+    type PublicKeyVar;
+    type SignatureVar;
+
+    fn verify(
+        cs: ConstraintSystemRef<CF>,
+        parameters: &Self::ParametersVar,
+        public_key: &Self::PublicKeyVar,
+        message: &[UInt8<CF>],
+        signature: &Self::SignatureVar,
+    ) -> Result<Boolean<CF>, SynthesisError>;
+}
 
 pub struct SchnorrSignatureVerifyGadget<C: ProjectiveCurve, GC: CurveVar<C, ConstraintF<C>>>
 where
@@ -42,6 +58,7 @@ where
     type SignatureVar = SignatureVar<C, GC>;
 
     fn verify(
+        cs: ConstraintSystemRef<ConstraintF<C>>,
         parameters: &Self::ParametersVar,
         public_key: &Self::PublicKeyVar,
         message: &[UInt8<ConstraintF<C>>],
@@ -75,7 +92,7 @@ where
         }
 
         let b2s_params = <Blake2sParametersVar as AllocVar<_, ConstraintF<C>>>::new_constant(
-            ConstraintSystemRef::None,
+            cs.clone(),
             (),
         )?;
 
@@ -103,16 +120,17 @@ where
 //         println!("verification_point_bytes {:?}", verification_point_bytes);
         let mut verification_point_var: Vec<UInt8<ConstraintF<C>>> = vec![];
         for coord in verification_point_bytes {
-            verification_point_var.push(UInt8::new_variable(ConstraintSystemRef::None, || Ok(coord), AllocationMode::Constant).unwrap());
+            verification_point_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Constant).unwrap());
             // println!("VECTOR VAR VALUE {:?}", coord);
         }
 
 //         println!("verification_point_var {:?}", verification_point_var.value());
 
         
-        println!("VERIFICATION POINT VAR: {:?}", verification_point_var.bytes);
-        println!("VERIFIER CHALLENGE: {:?}", verifier_challenge.as_slice().bytes);
         verification_point_var.is_eq(verifier_challenge.as_slice())
+        // println!("RESULT {:?}", result.value());
+        
+        // Dummy return value
         // Ok(ark_r1cs_std::prelude::Boolean::Constant(true))
 
     }

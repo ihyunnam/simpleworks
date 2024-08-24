@@ -1,15 +1,11 @@
 use ark_r1cs_std::{eq::EqGadget, R1CSVar};
-use ark_crypto_primitives::signature::SigVerifyGadget;
+// use ark_crypto_primitives::signature::SigVerifyGadget;
 use ark_r1cs_std::{alloc::{AllocVar, AllocationMode}, prelude::Boolean, uint8::UInt8};
 use ark_ff::PrimeField;
 mod schnorr_signature;
-
+// use crate::SigVerifyGadget;
 use schnorr_signature::
-    {schnorr::{Schnorr, Parameters, PublicKey, Signature, KeyAggContext, FirstRound, SecondRound, PubNonce, PartialSignature},
-    schnorr_signature_verify_gadget::SchnorrSignatureVerifyGadget,
-    public_key_var::PublicKeyVar,
-    parameters_var::ParametersVar,
-    signature_var::SignatureVar,
+    {parameters_var::ParametersVar, public_key_var::PublicKeyVar, schnorr::{FirstRound, KeyAggContext, Parameters, PartialSignature, PubNonce, PublicKey, Schnorr, SecondRound, Signature}, schnorr_signature_verify_gadget::{SchnorrSignatureVerifyGadget, SigVerifyGadget}, signature_var::SignatureVar
 };
 
 use ark_ec::ProjectiveCurve;
@@ -184,7 +180,7 @@ fn main() {
         AllocationMode::Witness,
     ).unwrap();
 
-    let schnorr_verified = SchnorrSignatureVerifyGadget::<C,GG>::verify(&schnorr_param, &schnorr_apk, &reconstructed_msg_wtns, &schnorr_sig).unwrap();
+    let schnorr_verified = SchnorrSignatureVerifyGadget::<C,GG>::verify(cs.clone(), &schnorr_param, &schnorr_apk, &reconstructed_msg_wtns, &schnorr_sig).unwrap();
     println!("schnorr verified inside circuit {:?}", schnorr_verified.value());
     schnorr_verified.is_eq(&Boolean::TRUE);
 }
