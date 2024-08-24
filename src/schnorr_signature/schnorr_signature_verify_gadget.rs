@@ -69,66 +69,53 @@ where
         let verifier_challenge = signature.verifier_challenge.clone();
         
         let pubkey_affine = public_key.pub_key.value().unwrap_or(C::default()).into_affine();
+
+        println!("pubkey affine {:?}", pubkey_affine);
         let mut agg_pubkey_serialized = [0u8; 32];
         pubkey_affine.serialize(&mut agg_pubkey_serialized[..]);
-        // let hello = prover_response.value().unwrap();
-        // println!("PROVER RESPONSE IN GADGET {:?}", prover_response.value().unwrap());
-        // println!("VERIFIER CHALLENGE IN GADGET {:?}", verifier_challenge.value().unwrap());
-        // println!("VERIFIER CHALLENGE AS SLICE {:?}", verifier_challenge.as_slice().value().unwrap());   // SAME AS VERIFIER CHALLENGE
 
         let mut reader = Cursor::new(prover_response.value().unwrap_or([0u8;32].to_vec()));
 
         // Deserialize the bytes back into an affine point
         let prover_response_fe = C::ScalarField::deserialize(&mut reader).unwrap();
-        
-        let mut hash_input = Vec::new();
-// let hasdf = verifier_challenge.value();
-        hash_input.extend_from_slice(&verifier_challenge.value().unwrap_or(vec![]));
-        hash_input.extend_from_slice(&agg_pubkey_serialized);
-        hash_input.extend_from_slice(&message.value().unwrap_or(vec![]));
-
+     
         let mut hash_var: Vec<UInt8<ConstraintF<C>>> = vec![];
-        for coord in hash_input {
-            hash_var.push(UInt8::new_variable(ConstraintSystemRef::None, || Ok(coord), AllocationMode::Constant).unwrap());
+        for coord in verifier_challenge.value().unwrap_or(vec![0u8;32]) {
+            // println!("coord vc {:?}", coord);
+            hash_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
+        }
+        for coord in agg_pubkey_serialized {
+            // println!("coord ap {:?}", coord);
+            hash_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
+        }
+        for coord in message.value().unwrap_or(vec![0u8;96]) {
+            // println!("coord msg {:?}", coord);
+            hash_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
         }
 
-        let b2s_params = <Blake2sParametersVar as AllocVar<_, ConstraintF<C>>>::new_constant(
+        // println!("hash_var {:?}", hash_var.value());
+
+        let b2s_params: Blake2sParametersVar = <Blake2sParametersVar as AllocVar<_, ConstraintF<C>>>::new_constant(
             cs.clone(),
             (),
         )?;
 
-        println!("b2s param {:?}", b2s_params);
-        // let hello = prover_response.value().unwrap();
-        // TODO: ROGadget to Poseidon?
-        let hash = ROGadget::evaluate(&b2s_params, &hash_var)?.0;
-//         println!("hash {:?}", hash);
-//         // println!("HASH VALUE {:?}", hash.value().unwrap());  // SAME
-//         // let hello =  parameters.generator.value().unwrap
-//         // let hello = public_key.pub_key.value().unwrap();
-        let e = C::ScalarField::from_be_bytes_mod_order(&hash.value().unwrap());
-//         println!("E VALUE {:?}", e);
+        let hash = ROGadget::evaluate(&b2s_params, &hash_var)?;
+        // println!("HASH {:?}", hash.value());
 
-//         // let hello = public_key.pub_key.value().unwrap();
+        let e = C::ScalarField::from_be_bytes_mod_order(&hash.value().unwrap_or([0u8;32]));
+
         let verification_point = parameters.generator.value().unwrap_or(C::default()).into_affine().mul(prover_response_fe).sub(public_key.pub_key.value().unwrap_or(C::default()).into_affine().mul(e)).into_affine();
-//         println!("verification_point {:?}", verification_point);
 
-//         // let verification_point = parameters.generator.scalar_mul_le(prover_response.value().unwrap())
         let mut verification_point_bytes: Vec<u8> = vec![];
         verification_point.serialize(&mut verification_point_bytes);
-//         // println!("VERIFICATION POINT BYTES {:?}", verification_point_bytes);    // DIFFERENT
-//         // println!("PARAMETER GENERATOR {:?}", parameters.generator.value().unwrap().into_affine());
 
-//         println!("verification_point_bytes {:?}", verification_point_bytes);
         let mut verification_point_var: Vec<UInt8<ConstraintF<C>>> = vec![];
         for coord in verification_point_bytes {
-            verification_point_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Constant).unwrap());
-            // println!("VECTOR VAR VALUE {:?}", coord);
+            verification_point_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
         }
-
-//         println!("verification_point_var {:?}", verification_point_var.value());
-
         
-        verification_point_var.enforce_equal(verifier_challenge.as_slice());
+        verification_point_var.enforce_equal(&verifier_challenge);
         // println!("RESULT {:?}", result.value());
         
         // Dummy return value
