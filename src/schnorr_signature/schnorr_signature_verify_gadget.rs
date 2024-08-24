@@ -1,5 +1,5 @@
 use ark_bls12_381::FrParameters;
-use ark_crypto_primitives::SignatureScheme;
+use ark_crypto_primitives::signature::SignatureScheme;
 use ark_marlin::ahp::verifier;
 use ark_r1cs_std::{alloc::AllocationMode, R1CSVar};
 // use crate::schnorr_signature::Signature,
