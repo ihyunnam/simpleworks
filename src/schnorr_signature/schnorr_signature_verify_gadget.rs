@@ -1,3 +1,4 @@
+use ark_bls12_381::FrParameters;
 use ark_crypto_primitives::SignatureScheme;
 use ark_marlin::ahp::verifier;
 use ark_r1cs_std::{alloc::AllocationMode, R1CSVar};
@@ -9,8 +10,8 @@ use super::{
     signature_var::SignatureVar,
     Blake2sParametersVar, ConstraintF,
 };
-use ark_bls12_381::{Bls12_381 as E, Fr};
-use ark_ff::{bytes, BigInteger, Field, FromBytes, PrimeField};
+// use ark_bls12_381::{Bls12_381 as E, Fr};
+use ark_ff::{bytes, BigInteger, Field, Fp256, FromBytes, PrimeField};
 // use ark_crypto_primitives::signature::SigVerifyGadget;
 use ark_ec::{ProjectiveCurve, AffineCurve};
 use ark_r1cs_std::{ToBitsGadget, ToBytesGadget};
@@ -18,17 +19,17 @@ use ark_r1cs_std::{
     prelude::{AllocVar, Boolean, CurveVar, EqGadget, GroupOpsBounds},
     uint8::UInt8,
 };
-use ark_relations::r1cs::{ConstraintSystemRef, SynthesisError};
+use ark_relations::r1cs::{ConstraintSystemRef, Namespace, SynthesisError};
 use std::{io::Cursor, marker::PhantomData};
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
 
-pub trait SigVerifyGadget<S: SignatureScheme, CF: Field> {
+pub trait SigVerifyGadget<F: Field, S: SignatureScheme, CF: Field> {
     type ParametersVar;
     type PublicKeyVar;
     type SignatureVar;
 
     fn verify(
-        cs: ConstraintSystemRef<CF>,
+        cs: ConstraintSystemRef<F>,
         parameters: &Self::ParametersVar,
         public_key: &Self::PublicKeyVar,
         message: &[UInt8<CF>],
@@ -46,19 +47,19 @@ where
     _group_gadget: PhantomData<*const GC>,
 }
 
-impl<C, GC> SigVerifyGadget<Schnorr<C>, ConstraintF<C>> for SchnorrSignatureVerifyGadget<C, GC>
+impl<C, GC> SigVerifyGadget<Fp256<FrParameters>, Schnorr<C>, ConstraintF<C>> for SchnorrSignatureVerifyGadget<C, GC>
 where
     C: ProjectiveCurve,
     GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
-    // <C as ProjectiveCurve>::ScalarField: AsRef<[u64]>,
+    Namespace<<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField>: From<ark_relations::r1cs::ConstraintSystemRef<Fp256<ark_ed_on_bls12_381::FqParameters>>>,
 {
     type ParametersVar = ParametersVar<C, GC>;
     type PublicKeyVar = PublicKeyVar<C, GC>;
     type SignatureVar = SignatureVar<C, GC>;
 
     fn verify(
-        cs: ConstraintSystemRef<ConstraintF<C>>,
+        cs: ConstraintSystemRef<Fp256<FrParameters>>,
         parameters: &Self::ParametersVar,
         public_key: &Self::PublicKeyVar,
         message: &[UInt8<ConstraintF<C>>],
