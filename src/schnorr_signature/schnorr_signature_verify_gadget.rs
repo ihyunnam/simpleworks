@@ -128,11 +128,11 @@ where
 //         println!("verification_point_var {:?}", verification_point_var.value());
 
         
-        verification_point_var.is_eq(verifier_challenge.as_slice())
+        verification_point_var.enforce_equal(verifier_challenge.as_slice());
         // println!("RESULT {:?}", result.value());
         
         // Dummy return value
-        // Ok(ark_r1cs_std::prelude::Boolean::Constant(true))
+        Ok(ark_r1cs_std::prelude::Boolean::Constant(true))
 
     }
 }
