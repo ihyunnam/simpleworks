@@ -110,7 +110,7 @@ where
 //         println!("verification_point_var {:?}", verification_point_var.value());
 
         // verification_point_var.is_eq(verifier_challenge.as_slice())
-        Ok(())
+        Ok(true)
 
     }
 }
