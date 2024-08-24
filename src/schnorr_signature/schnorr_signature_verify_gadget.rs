@@ -79,10 +79,11 @@ where
             (),
         )?;
 
+        println!("b2s param {:?}", b2s_params);
         // let hello = prover_response.value().unwrap();
         // TODO: ROGadget to Poseidon?
         let hash = ROGadget::evaluate(&b2s_params, &hash_var)?.0;
-
+        println!("hash {:?}", hash);
         // println!("HASH VALUE {:?}", hash.value().unwrap());  // SAME
         // let hello =  parameters.generator.value().unwrap
         // let hello = public_key.pub_key.value().unwrap();

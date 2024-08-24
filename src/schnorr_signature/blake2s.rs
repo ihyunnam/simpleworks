@@ -59,7 +59,7 @@ impl RandomOracle for RO {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ParametersVar;
 
 pub struct ROGadget;
