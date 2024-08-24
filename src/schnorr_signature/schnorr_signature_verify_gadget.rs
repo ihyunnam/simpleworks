@@ -2,6 +2,7 @@ use ark_bls12_381::FrParameters;
 use ark_crypto_primitives::SignatureScheme;
 use ark_marlin::ahp::verifier;
 use ark_r1cs_std::{alloc::AllocationMode, R1CSVar};
+// use crate::schnorr_signature::Signature,
 use super::{
     blake2s::{ROGadget, RandomOracleGadget},
     parameters_var::ParametersVar,
@@ -65,6 +66,7 @@ where
         message: &[UInt8<ConstraintF<C>>],
         signature: &Self::SignatureVar,
     ) -> Result<Boolean<ConstraintF<C>>, SynthesisError> {
+        // TODO: make faster. signature is already a witness when received...
         let prover_response = signature.prover_response.clone();
         let verifier_challenge = signature.verifier_challenge.clone();
         

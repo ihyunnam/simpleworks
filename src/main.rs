@@ -238,47 +238,47 @@ impl<C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<C, GG> where
         // EVERYTHING IS ALL SAME
 
 
-        // println!("SCHNORR VERIFY AT NONE {:?}", schnorr_verified.value());      // Err(AssignmentMissing if ingredients are [0] and stuff)
-        // let verified_select: Boolean<ConstraintF<C>> = first_login_wtns.select(&Boolean::TRUE, &schnorr_verified)?;
-        // println!("VERIFIED SELECT (should be true) {:?}", verified_select.value());
-        // verified_select.enforce_equal(&Boolean::TRUE)?;
+        println!("SCHNORR VERIFY AT NONE {:?}", schnorr_verified.value());      // Err(AssignmentMissing if ingredients are [0] and stuff)
+        let verified_select: Boolean<ConstraintF<C>> = first_login_wtns.select(&Boolean::TRUE, &schnorr_verified)?;
+        println!("VERIFIED SELECT (should be true) {:?}", verified_select.value());
+        verified_select.enforce_equal(&Boolean::TRUE)?;
         
-        // /* Check that the schnorr_apk provided is the apk committed to at registration and given to RP. */
-        // let default_rand = PedersenRandomness::default();
-        // let pedersen_randomness = PedersenRandomnessVar::<ConstraintF<C>>::new_variable(
-        //     cs.clone(),
-        //     || Ok(self.pedersen_rand.as_ref().unwrap_or(&default_rand)),
-        //     AllocationMode::Witness,
-        // ).unwrap();
+        /* Check that the schnorr_apk provided is the apk committed to at registration and given to RP. */
+        let default_rand = PedersenRandomness::default();
+        let pedersen_randomness = PedersenRandomnessVar::<ConstraintF<C>>::new_variable(
+            cs.clone(),
+            || Ok(self.pedersen_rand.as_ref().unwrap_or(&default_rand)),
+            AllocationMode::Witness,
+        ).unwrap();
 
-        // let default_param = PedersenParameters::<C> {
-        //     randomness_generator: vec![],
-        //     generators: vec![vec![];16],        // NUM_WINDOWS=16 hardcoded
-        // };
+        let default_param = PedersenParameters::<C> {
+            randomness_generator: vec![],
+            generators: vec![vec![];16],        // NUM_WINDOWS=16 hardcoded
+        };
 
-        // let pedersen_params = PedersenParametersVar::<C,GG>::new_variable(
-        //     cs.clone(),
-        //     || Ok(self.pedersen_params.as_ref().unwrap_or(&default_param)),
-        //     AllocationMode::Constant,
-        // ).unwrap();
+        let pedersen_params = PedersenParametersVar::<C,GG>::new_variable(
+            cs.clone(),
+            || Ok(self.pedersen_params.as_ref().unwrap_or(&default_param)),
+            AllocationMode::Constant,
+        ).unwrap();
 
-        // let schnorr_apk_var = UInt8::<ConstraintF<C>>::new_witness_vec (
-        //     cs.clone(),
-        //     &{   
-        //         let apk = self.schnorr_apk.as_ref().unwrap_or(&default_pubkey);
-        //         let mut h_vec = vec![0u8; 32];  // Vec<u8> avoids lifetime issues
-        //         apk.serialize(&mut h_vec[..]).unwrap();
+        let schnorr_apk_var = UInt8::<ConstraintF<C>>::new_witness_vec (
+            cs.clone(),
+            &{   
+                let apk = self.schnorr_apk.as_ref().unwrap_or(&default_pubkey);
+                let mut h_vec = vec![0u8; 32];  // Vec<u8> avoids lifetime issues
+                apk.serialize(&mut h_vec[..]).unwrap();
 
-        //         h_vec
-        //     }
-        // ).unwrap();
+                h_vec
+            }
+        ).unwrap();
 
         // let computed_commit = CommGadget::<C,GG,Window>::commit(&pedersen_params, &schnorr_apk_var, &pedersen_randomness).unwrap_or(GG::zero());
-        // // POINT AT INFINITY AT DEFAULT
+        // POINT AT INFINITY AT DEFAULT
 
-        // // let computed_commit_bytes = computed_commit.to_bytes().unwrap();
+        // let computed_commit_bytes = computed_commit.to_bytes().unwrap();
 
-        // // println!("COMPUTED COMMIT BYTES {:?}", computed_commit_bytes);
+        // println!("COMPUTED COMMIT BYTES {:?}", computed_commit_bytes);
         
         // let apk_commit_x: Fp256<ark_bls12_381::FrParameters> = self.apk_commit_x.ok_or(SynthesisError::AssignmentMissing)?;
         // let apk_commit_y: Fp256<ark_bls12_381::FrParameters> = self.apk_commit_y.ok_or(SynthesisError::AssignmentMissing)?;
