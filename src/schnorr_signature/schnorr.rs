@@ -35,14 +35,15 @@ use derivative::Derivative;
 #[derive(Default, Clone)]
 pub struct MyPoseidonParams;
 
+// from 0.4.0 default values: PoseidonDefaultConfigEntry::new(2, 17, 8, 31, 0),         // PARAMS_OPT_FOR_CONSTRAINTS
 impl<F: PrimeField> PoseidonRoundParams<F> for MyPoseidonParams {
-    const WIDTH: usize = 6; // Example width, change as needed
-    const FULL_ROUNDS_BEGINNING: usize = 8;
-    const FULL_ROUNDS_END: usize = 8;
-    const PARTIAL_ROUNDS: usize = 22;
+    const WIDTH: usize = 2; // rate in 0.4.0
+    const FULL_ROUNDS_BEGINNING: usize = 4;     // full_rounds = 8. Assume mid-split.
+    const FULL_ROUNDS_END: usize = 4;
+    const PARTIAL_ROUNDS: usize = 31;
     
     // Define the S-Box here (can use Poseidon's recommended S-Box)
-    const SBOX: PoseidonSbox = PoseidonSbox::Exponentiation(5);
+    const SBOX: PoseidonSbox = PoseidonSbox::Exponentiation(17);         // alpha in 0.4.0
 }
 
 // NOTE: 

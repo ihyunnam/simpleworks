@@ -1,3 +1,4 @@
+use ark_crypto_primitives_04::sponge::poseidon::*;
 use ark_crypto_primitives::crh::CRHGadget as CRHGadgetTrait;
 use ark_crypto_primitives::crh::poseidon::sbox::PoseidonSbox;
 use ark_crypto_primitives::crh::poseidon::PoseidonRoundParams;
@@ -28,7 +29,7 @@ use ark_std::Zero;
 use ark_ec::twisted_edwards_extended::{GroupAffine, GroupProjective};
 use ark_ec::{AffineCurve, ModelParameters, PairingEngine, ProjectiveCurve};
 use ark_ed_on_bls12_381::EdwardsParameters;
-use ark_ff::{BigInteger, BigInteger256, BitIteratorLE, Fp256, One, PrimeField};
+use ark_ff::{BigInteger, BigInteger256, BitIteratorLE, Fp256, One};
 // use ark_ec::{ProjectiveCurve};
 use ark_ff::{
     // bytes::{FromBytes, ToBytes},
@@ -108,7 +109,7 @@ pub struct InsertCircuit<W, C: ProjectiveCurve, GG: CurveVar<C, ConstraintF<C>>>
 
 impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where 
     W: ark_crypto_primitives::crh::pedersen::Window,
-    ConstraintF<C>: Field,
+    ConstraintF<C>: ark_ff_04::PrimeField,
     C: ProjectiveCurve,
     GG: CurveVar<C, ConstraintF<C>>,
     for<'a> &'a GG: ark_r1cs_std::groups::GroupOpsBounds<'a, C, GG>,
@@ -474,6 +475,8 @@ fn main() {
     let msg3 = msg.clone();
     
     /* Generate Poseidon hash parameters for Musig2 */
+    let (ark, mds) = find_poseidon_ark_and_mds::<ConstraintF<C>> (0,2,8,31,0);
+
     let poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
         params: MyPoseidonParams::default(),
         round_keys: vec![],
