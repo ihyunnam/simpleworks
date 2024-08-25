@@ -6,11 +6,13 @@ use ark_serialize::CanonicalSerialize;
 use ark_ed_on_bls12_381::{EdwardsProjective, EdwardsParameters};
 use ark_bls12_381::G1Projective;
 use subtle::Choice;
-
+use ark_ed_on_bls12_381::EdwardsProjective as JubJub;
 // type C = EdwardsProjective;
 // type P = EdwardsParameters;
 use std::collections::HashMap;
-
+use ark_crypto_primitives::crh::{CRH as CRHTrait, poseidon::sbox::PoseidonSbox};
+use ark_crypto_primitives::crh::poseidon::{self, PoseidonRoundParams};
+use ark_crypto_primitives::crh::poseidon::{CRH, Poseidon, constraints::{PoseidonRoundParamsVar}};
 use sha2::Digest as _;
 use ark_crypto_primitives::{Error, SignatureScheme};
 use ark_ec::{twisted_edwards_extended::GroupAffine, AffineCurve, ProjectiveCurve, TEModelParameters};
@@ -29,6 +31,19 @@ use musig2::{
 };
 
 use derivative::Derivative;
+
+#[derive(Default, Clone)]
+pub struct MyPoseidonParams;
+
+impl<F: PrimeField> PoseidonRoundParams<F> for MyPoseidonParams {
+    const WIDTH: usize = 6; // Example width, change as needed
+    const FULL_ROUNDS_BEGINNING: usize = 8;
+    const FULL_ROUNDS_END: usize = 8;
+    const PARTIAL_ROUNDS: usize = 22;
+    
+    // Define the S-Box here (can use Poseidon's recommended S-Box)
+    const SBOX: PoseidonSbox = PoseidonSbox::Exponentiation(5);
+}
 
 // NOTE: 
 // MaybePoint - point on bls12_381 (Affine, like PublicKey?)
@@ -50,6 +65,12 @@ pub struct Parameters<C: ProjectiveCurve> {
     pub salt: Option<[u8; 32]>,
 }
 
+// type W = Window;
+type C = JubJub; 
+// type GG = EdwardsVar;
+type ConstraintF<C> = <<C as ProjectiveCurve>::BaseField as Field>::BasePrimeField;
+// type P = PoseidonRoundParams<ConstraintF<C>>;
+// type MyEnc = ElGamal<JubJub>;
 pub type PublicKey<C> = <C as ProjectiveCurve>::Affine;
 
 /* ADDED BY ME FOR MUSIG2. */
@@ -132,6 +153,8 @@ where
             hash_input.extend_from_slice(&to_bytes![sk.public_key]?);
             hash_input.extend_from_slice(&to_bytes![prover_commitment]?);
             hash_input.extend_from_slice(message);
+
+            // let hash_digest = CRH::evaluate(&hash_input);
 
             let hash_digest = Blake2s::digest(&hash_input);
             assert!(hash_digest.len() >= 32);
@@ -815,11 +838,12 @@ impl FirstRound {
         seckey: SecretKey<EdwardsProjective>,
         message: M,
         pubnonces: Vec<PubNonce>,
+        poseidon_params: &Poseidon<ConstraintF<C>, MyPoseidonParams>,
     ) -> Result<SecondRound<M>, RoundFinalizeError>
     where
         M: AsRef<[u8]>,
     {
-        self.finalize_adaptor(seckey, message, pubnonces)
+        self.finalize_adaptor(seckey, message, pubnonces, &poseidon_params)
     }
 
     /// Finishes the first round once all nonces are received, combining nonces
@@ -849,7 +873,8 @@ impl FirstRound {
         seckey: SecretKey<EdwardsProjective>,
         // adaptor_point: MaybePoint,
         message: M,
-        pubnonces: Vec<PubNonce>
+        pubnonces: Vec<PubNonce>,
+        poseidon_params: &Poseidon<ConstraintF<C>, MyPoseidonParams>,
     ) -> Result<SecondRound<M>, RoundFinalizeError>
     where
         M: AsRef<[u8]>,
@@ -869,6 +894,7 @@ impl FirstRound {
             &aggnonce,
             // adaptor_point,
             &message,
+            poseidon_params,
         )?;
 
         // println!("PARTIAL SIGNATURE CREATED {:?} FOR {:?}", partial_signature, self.signer_index);
@@ -986,12 +1012,12 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
     /// If the [`FirstRound`] was finalized with [`FirstRound::finalize_adaptor`], then
     /// the second round must also be finalized with [`SecondRound::finalize_adaptor`],
     /// otherwise this method will return [`RoundFinalizeError::InvalidAggregatedSignature`].
-    pub fn finalize(self, partial_signatures: Vec<PartialSignature>) -> Result<Signature<EdwardsProjective>, RoundFinalizeError>
+    pub fn finalize(self, partial_signatures: Vec<PartialSignature>, poseidon_params: &Poseidon<ConstraintF<C>, MyPoseidonParams>) -> Result<Signature<EdwardsProjective>, RoundFinalizeError>
     // where
     //     T: From<LiftedSignature>,
     {
         let sig = self
-            .finalize_adaptor(partial_signatures)?;
+            .finalize_adaptor(partial_signatures, poseidon_params)?;
             // .adapt(MaybeScalar::Zero)    // WHAT THIS DOES: Adapts the signature into a lifted signature with a given adaptor secret.
             // .expect("finalizing with empty adaptor should never result in an adaptor failure");
 
@@ -1012,13 +1038,14 @@ impl<M: AsRef<[u8]>> SecondRound<M> {
     ///
     /// If this signing session did not use adaptor signatures, the signature returned by
     /// this method will be a valid signature which can be adapted with `MaybeScalar::Zero`.
-    pub fn finalize_adaptor(self, partial_signatures: Vec<PartialSignature>) -> Result<Signature<EdwardsProjective>, RoundFinalizeError> {
+    pub fn finalize_adaptor(self, partial_signatures: Vec<PartialSignature>, poseidon_params: &Poseidon<ConstraintF<C>, MyPoseidonParams>) -> Result<Signature<EdwardsProjective>, RoundFinalizeError> {
         // let partial_signatures: Vec<PartialSignature> = self.partial_signature_slots.finalize()?;   // FINALIZE UNRELATED TO ADAPTOR
         let final_signature = aggregate_partial_signatures(
             &self.key_agg_ctx,
             &self.aggnonce,
             partial_signatures,
             &self.message,
+            poseidon_params,
         )?;
         Ok(final_signature)
     }
@@ -1131,6 +1158,7 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     aggregated_nonce: &AggNonce,
     // adaptor_point: impl Into<MaybePoint>,
     message: impl AsRef<[u8]>,
+    poseidon_params: &Poseidon<ConstraintF<C>, MyPoseidonParams>, 
 ) -> Result<T, SigningError> {
     // let adaptor_point: MaybePoint = adaptor_point.into();
     // let seckey: Scalar = seckey.into(); // TODO: JUST EXTRACT THE SCALAR OUT OF SECKEY
@@ -1166,7 +1194,7 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     final_nonce.serialize(&mut nonce_x_bytes);
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);
-    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message);
+    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message, poseidon_params);       // TODO: AVOID CLONE
 
     // if has_even_Y(R):
     //   k = k1 + b*k2
@@ -1194,6 +1222,7 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
         pubkey,
         &pubnonce,
         &message,
+        poseidon_params,
     )?;
 
     Ok(T::from(partial_signature))
@@ -1206,6 +1235,7 @@ pub fn compute_challenge_hash_tweak<S>(
     final_nonce_xonly: &[u8; 32],
     aggregated_pubkey: &Point,
     message: impl AsRef<[u8]>,
+    poseidon_params: &Poseidon<ConstraintF<C>, MyPoseidonParams>,
 ) -> S 
 where
     S: From<MaybeScalar>,
@@ -1224,13 +1254,20 @@ where
     //     .finalize()
     //     .into();
 
-    let mut hash_input = Vec::new();
+    let mut hash_input: Vec<u8> = Vec::new();
     hash_input.extend_from_slice(final_nonce_xonly);
     hash_input.extend_from_slice(&bytes);
     hash_input.extend_from_slice(message.as_ref());
-
-    let hash = Blake2s::digest(&hash_input);
-    S::from(MaybeScalar::from_be_bytes_mod_order(&hash))
+    
+    // let poseidon_params = Poseidon::<ConstraintF<C>, PoseidonRoundParams<F>> {
+    //     params: MyPoseidonParams::default(),
+    //     round_keys: vec![],
+    //     mds_matrix: vec![],     // TODO: generate mds matrix
+    // };
+    let mut vector = vec![];
+    let hash = CRH::evaluate(poseidon_params, &hash_input).unwrap();      // TODO: hash output [u8;32] unclear. Originally just [u8].
+    hash.serialize(&mut vector);
+    S::from(MaybeScalar::from_be_bytes_mod_order(&vector))
 }
 
 
@@ -1252,6 +1289,7 @@ pub fn verify_partial_adaptor(
     individual_pubkey: impl Into<Point>,
     individual_pubnonce: &PubNonce,
     message: impl AsRef<[u8]>,
+    poseidon_params: &Poseidon<ConstraintF<C>, MyPoseidonParams>,
 ) -> Result<(), VerifyError> {
     // let partial_signature: MaybeScalar = partial_signature.into();
 
@@ -1283,7 +1321,7 @@ pub fn verify_partial_adaptor(
     final_nonce.serialize(&mut nonce_x_bytes);
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
-    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message);
+    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message, poseidon_params);
 
     // s * G == R + (g * gacc * e * a * P)
     // let challenge_parity = aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc;
@@ -1314,6 +1352,7 @@ pub fn aggregate_partial_adaptor_signatures<S: Into<PartialSignature>> (
     // adaptor_point: impl Into<MaybePoint>,
     partial_signatures: impl IntoIterator<Item = S>,
     message: impl AsRef<[u8]>,
+    poseidon_params: &Poseidon<ConstraintF<C>, MyPoseidonParams>,
 ) -> Result<Signature<EdwardsProjective>, VerifyError> {
     // let adaptor_point: MaybePoint = adaptor_point.into();
     let aggregated_pubkey = key_agg_ctx.pubkey;
@@ -1327,7 +1366,7 @@ pub fn aggregate_partial_adaptor_signatures<S: Into<PartialSignature>> (
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
     // let nonce_x_bytes = final_nonce.x.serialize();
-    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message);
+    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message, poseidon_params);
 
     let elem = e * key_agg_ctx.tweak_acc;
     // if aggregated_pubkey.parity() {  // NOTE: TOOK OUT PARITY CHECK
@@ -1369,6 +1408,7 @@ pub fn aggregate_partial_signatures<S>(
     aggregated_nonce: &AggNonce,
     partial_signatures: impl IntoIterator<Item = S>,
     message: impl AsRef<[u8]>,
+    poseidon_params: &Poseidon<ConstraintF<C>, MyPoseidonParams>,
 ) -> Result<Signature<EdwardsProjective>, VerifyError>
 where
     S: Into<PartialSignature>,
@@ -1380,6 +1420,7 @@ where
         // MaybePoint::Infinity,
         partial_signatures,
         message,
+        poseidon_params,
     )?;
     // .adapt(MaybeScalar::Zero)
     // .map(T::from)

@@ -19,8 +19,8 @@ pub use signature_var::SignatureVar;
 pub mod public_key_var;
 pub use public_key_var::PublicKeyVar;
 
-pub mod schnorr_signature_verify_gadget;
-pub use schnorr_signature_verify_gadget::SchnorrSignatureVerifyGadget;
+// pub mod schnorr_signature_verify_gadget;
+// pub use schnorr_signature_verify_gadget::SchnorrSignatureVerifyGadget;
 
 pub mod blake2s;
 pub use blake2s::ParametersVar as Blake2sParametersVar;
