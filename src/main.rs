@@ -1,8 +1,8 @@
-use ark_crypto_primitives_04::sponge::poseidon::*;
+// use ark_crypto_primitives_04::sponge::poseidon::*;
 use ark_crypto_primitives::crh::CRHGadget as CRHGadgetTrait;
 use ark_crypto_primitives::crh::poseidon::sbox::PoseidonSbox;
 use ark_crypto_primitives::crh::poseidon::PoseidonRoundParams;
-use ark_crypto_primitives::crh::poseidon::{Poseidon, constraints::{PoseidonRoundParamsVar, CRHGadget}};
+use ark_crypto_primitives::crh::poseidon::{Poseidon, constraints::{PoseidonRoundParamsVar, CRHGadget, find_poseidon_ark_and_mds}};
 use std::convert::TryInto;
 
 // THIS IS WITHOUT AGGREGATE SCHNORR AND PUBLIC INPUTS
@@ -24,16 +24,16 @@ use std::ops::Mul;
 use ark_relations::r1cs::Namespace;
 use ark_std::Zero;
 // use ark_crypto_primitives::crh::poseidon::{Poseidon, PoseidonRoundParams};
-// use ark_crypto_primitives::signature::SigVerifyGadget;
+use ark_crypto_primitives::signature::SigVerifyGadget;
 // use ark_crypto_primitives::{Error, SignatureScheme};
 use ark_ec::twisted_edwards_extended::{GroupAffine, GroupProjective};
 use ark_ec::{AffineCurve, ModelParameters, PairingEngine, ProjectiveCurve};
 use ark_ed_on_bls12_381::EdwardsParameters;
-use ark_ff::{BigInteger, BigInteger256, BitIteratorLE, Fp256, One};
+use ark_ff::{BigInteger, BigInteger256, BitIteratorLE, Fp256, One, PrimeField};
 // use ark_ec::{ProjectiveCurve};
 use ark_ff::{
-    // bytes::{FromBytes, ToBytes},
-    fields::Field,
+    bytes::{FromBytes, ToBytes},
+    fields::{Field},
     UniformRand,
 };
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
@@ -96,7 +96,7 @@ pub struct InsertCircuit<W, C: ProjectiveCurve, GG: CurveVar<C, ConstraintF<C>>>
     apk_commit_y: Option<ark_ff::Fp256<ark_bls12_381::FrParameters>>,
     pedersen_rand: Option<PedersenRandomness<C>>,
     pedersen_params: Option<PedersenParameters<C>>,
-    poseidon_params: Option<Poseidon<ConstraintF<C>, MyPoseidonParams>>,
+    poseidon_params: Option<Poseidon::<ConstraintF<C>, MyPoseidonParams>>,
     schnorr_sig: Option<Signature<C>>,
     h_prev: Option<[u8;32]>,           /* Record info */
     v_prev: Option<Ciphertext<C>>,
@@ -109,7 +109,7 @@ pub struct InsertCircuit<W, C: ProjectiveCurve, GG: CurveVar<C, ConstraintF<C>>>
 
 impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where 
     W: ark_crypto_primitives::crh::pedersen::Window,
-    ConstraintF<C>: ark_ff_04::PrimeField,
+    ConstraintF<C>: PrimeField,
     C: ProjectiveCurve,
     GG: CurveVar<C, ConstraintF<C>>,
     for<'a> &'a GG: ark_r1cs_std::groups::GroupOpsBounds<'a, C, GG>,
@@ -179,7 +179,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             }
         ).unwrap();
 
-        let mut hash_var: Vec<UInt8<ConstraintF<C>>> = verifier_challenge_wtns.clone();
+        // let mut hash_var: Vec<UInt8<ConstraintF<C>>> = verifier_challenge_wtns.clone();
 
         let end = start.elapsed();
         println!("time before verify {:?}", end);
@@ -203,8 +203,9 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                     cs.clone(),
                     &agg_pubkey_serialized,
                 ).unwrap();
-                hash_var.extend(agg_pubkey_wtns);
-                hash_var.extend(reconstructed_msg_wtns);
+                // hash_var.extend(agg_pubkey_wtns);
+                // hash_var.extend(reconstructed_msg_wtns);
+                // println!("HASH VAR LENGTH {:?}", hash_var.len());
                 let end = start.elapsed();
                 println!("verify 2 {:?}", end);
                 // println!("hash_var {:?}", hash_var.value());
@@ -214,26 +215,66 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                 //     (),
                 // )?;
 
-                let poseidon_params = PoseidonRoundParamsVar::<ConstraintF<C>, MyPoseidonParams>::new_variable(
+                let rng = &mut OsRng;
+                let default_poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
+                    params: MyPoseidonParams::default(),
+                    round_keys: vec![<ConstraintF<C>>::rand(rng);455],            // 6 = width hardcoded
+                    mds_matrix: vec![vec![<ConstraintF<C>>::rand(rng);6];6],
+                };
+                // println!("DEFAULT POSEIDON PARAMS {:?}", Poseidon::<ConstraintF<C>, MyPoseidonParams>::default());
+                let poseidon_params_wtns = PoseidonRoundParamsVar::<ConstraintF<C>, MyPoseidonParams>::new_variable(
                     cs.clone(),
-                    || Ok(self.poseidon_params.unwrap_or(Poseidon::<ConstraintF<C>, MyPoseidonParams>::default())),
+                    || Ok(self.poseidon_params.as_ref().unwrap_or(&default_poseidon_params)),
                     AllocationMode::Witness,
                 )?;
+                println!("HASH1 INPUT INSIDE GADGET {:?}", verifier_challenge_wtns.value());        // INPUTS ARE SAME. JUST THEIR HASHES ARE DIFFERENT.
+                println!("HASH2 INPUT INSIDE GADGET {:?}", agg_pubkey_wtns.value());
+                println!("HASH3 INPUT INSIDE GADGET {:?}", reconstructed_msg_wtns.value());
+                // println!("PARAMS INSIDE GADGET {:?}", poseidon_params_wtns.params);
 
-                let hash = CRHGadget::evaluate(&poseidon_params, &hash_var)?;
+                let hash1 = CRHGadget::evaluate(&poseidon_params_wtns, &verifier_challenge_wtns).unwrap();
+                // Fp256<ark_bls12_381::FrParameters>;
+                // let hello: <<C as ProjectiveCurve>::Affine as AffineCurve>::BaseField = hash1.value().unwrap();
+                println!("HASH1 INSIDE GADGET {:?}", hash1.value());
+                let hash2 = CRHGadget::evaluate(&poseidon_params_wtns, &agg_pubkey_wtns).unwrap();
+                println!("HASH2 INSIDE GADGET {:?}", hash2.value());
+                let hash3 = CRHGadget::evaluate(&poseidon_params_wtns, &reconstructed_msg_wtns).unwrap();
+                println!("HASH3 INSIDE GADGET {:?}", hash3.value());
+
+                // let hash = CRHGadget::evaluate(&poseidon_params, &hash_var)?;
                 let end = start.elapsed();
                 println!("verify 3 {:?}", end);
                 let start = Instant::now();
 
                 // let mut vector = vec![];
                 // hash.serialize(&mut vector);
+                let mut vector1 = vec![];
+                let mut vector2 = vec![];
+                let mut vector3 = vec![];
 
-                let hash: Vec<u8> = hash.to_bytes().unwrap_or_default()
-                .into_iter()
-                .map(|el| el.value().unwrap())
-                .collect();
+                let hash1 = hash1.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
+                    // .into_iter()
+                    // .map(|el| el.value().unwrap_or(0))
+                    // .collect();
+                let hash2 = hash2.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
+                    // .into_iter()
+                    // .map(|el| el.value().unwrap_or(0))
+                    // .collect();
+                let hash3 = hash3.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
+                    // .into_iter()
+                    // .map(|el| el.value().unwrap_or(0))
+                    // .collect();
 
-                let e = C::ScalarField::from_be_bytes_mod_order(hash.as_slice());
+                hash1.serialize(&mut vector1).unwrap();
+                hash2.serialize(&mut vector2).unwrap();
+                hash3.serialize(&mut vector3).unwrap();
+                let mut final_vector = Vec::with_capacity(vector1.len() + vector2.len() + vector3.len());
+                final_vector.extend(vector1);
+                final_vector.extend(vector2);
+                final_vector.extend(vector3);
+
+                println!("FINAL VECTOR IN GADGET {:?}", final_vector);
+                let e = C::ScalarField::from_be_bytes_mod_order(final_vector.as_slice());
                 
                 let verification_point = parameters.generator.mul(prover_response).sub(pubkey_affine.mul(e));
                 let mut verification_point_bytes: Vec<u8> = vec![];
@@ -251,7 +292,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
         println!("time schnorr verify {:?}", end);
 
         let start = Instant::now();
-        // println!("SCHNORR VERIFY AT NONE {:?}", schnorr_verified.value());      // Err(AssignmentMissing if ingredients are [0] and stuff)
+        println!("SCHNORR VERIFY AT NONE {:?}", schnorr_verified.value());      // Err(AssignmentMissing if ingredients are [0] and stuff)
         let verified_select: Boolean<ConstraintF<C>> = first_login_wtns.select(&Boolean::TRUE, &schnorr_verified)?;
         // TODO: move enforce equal into verify() and have only one?
 
@@ -472,15 +513,16 @@ fn main() {
     println!("schnorr msg from outside: {:?}", msg);
 
     let msg2 = msg.clone();
-    let msg3 = msg.clone();
+    // let msg3 = msg.clone();
     
-    /* Generate Poseidon hash parameters for Musig2 */
-    let (ark, mds) = find_poseidon_ark_and_mds::<ConstraintF<C>> (0,2,8,31,0);
-
+    /* Generate Poseidon hash parameters for Musig2 */      // 6, 5, 8, 57, 0
+    let (ark, mds) = find_poseidon_ark_and_mds::<ConstraintF<C>> (255, 6, 8, 57, 0);        // ark_bls12_381::FrParameters::MODULUS_BITS = 255
+    let hello: Vec<Fp256<ark_bls12_381::FrParameters>>= ark.clone().into_iter().flatten().collect();
+    println!("ARK LENGTH AS GENERATED {:?}", hello.len());
     let poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
         params: MyPoseidonParams::default(),
-        round_keys: vec![],
-        mds_matrix: vec![],
+        round_keys: ark.into_iter().flatten().collect(),
+        mds_matrix: mds,
     };
     
     /* AGGREGATE SCHNORR ATTEMPT - WORKS!! */
@@ -563,8 +605,8 @@ fn main() {
     
     /* RESUMES NON-AGGREGATE CODE. */
     
-    let schnorr_verified = Schnorr::<C>::verify(&schnorr_param, &aggregated_pubkey, &msg3, &last_sig).unwrap();
-    println!("schnorr verified outside circuit {:?}", schnorr_verified);
+    // let schnorr_verified = Schnorr::<C>::verify(&schnorr_param, &aggregated_pubkey, &msg3, &last_sig).unwrap();
+    // println!("schnorr verified outside circuit {:?}", schnorr_verified);
 
     let mut aggregated_pubkey_bytes = vec![];
     aggregated_pubkey.serialize(&mut aggregated_pubkey_bytes);
@@ -593,7 +635,7 @@ fn main() {
     // let h_cur_biginteger = BigInteger256::new(result);
 
     // // let h_cur_biginteger = BigInteger256::from(result);
-    // let h_cur_fe = Fp256::<ark_bls12_381::FrParameters>::new(h_cur_biginteger);
+    // let h_cur_fe =ark_bls12_381::FrParameters>::new(h_cur_biginteger);
 
     let insert_circuit_for_setup = InsertCircuit::<W, C, GG> {
         first_login: None,

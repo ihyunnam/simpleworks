@@ -6,7 +6,7 @@ use ark_serialize::CanonicalSerialize;
 use ark_ed_on_bls12_381::{EdwardsProjective, EdwardsParameters};
 use ark_bls12_381::G1Projective;
 use subtle::Choice;
-use ark_ed_on_bls12_381::EdwardsProjective as JubJub;
+// use ark_ed_on_bls12_381::EdwardsProjective as JubJub;
 // type C = EdwardsProjective;
 // type P = EdwardsParameters;
 use std::collections::HashMap;
@@ -32,18 +32,18 @@ use musig2::{
 
 use derivative::Derivative;
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]        // TODO: MUST REMOVE DEBUG
 pub struct MyPoseidonParams;
 
 // from 0.4.0 default values: PoseidonDefaultConfigEntry::new(2, 17, 8, 31, 0),         // PARAMS_OPT_FOR_CONSTRAINTS
 impl<F: PrimeField> PoseidonRoundParams<F> for MyPoseidonParams {
-    const WIDTH: usize = 2; // rate in 0.4.0
+    const WIDTH: usize = 6; // rate in 0.4.0
     const FULL_ROUNDS_BEGINNING: usize = 4;     // full_rounds = 8. Assume mid-split.
     const FULL_ROUNDS_END: usize = 4;
-    const PARTIAL_ROUNDS: usize = 31;
+    const PARTIAL_ROUNDS: usize = 57;
     
     // Define the S-Box here (can use Poseidon's recommended S-Box)
-    const SBOX: PoseidonSbox = PoseidonSbox::Exponentiation(17);         // alpha in 0.4.0
+    const SBOX: PoseidonSbox = PoseidonSbox::Exponentiation(5);         // alpha in 0.4.0
 }
 
 // NOTE: 
@@ -67,7 +67,7 @@ pub struct Parameters<C: ProjectiveCurve> {
 }
 
 // type W = Window;
-type C = JubJub; 
+type C = EdwardsProjective; 
 // type GG = EdwardsVar;
 type ConstraintF<C> = <<C as ProjectiveCurve>::BaseField as Field>::BasePrimeField;
 // type P = PoseidonRoundParams<ConstraintF<C>>;
@@ -77,7 +77,7 @@ pub type PublicKey<C> = <C as ProjectiveCurve>::Affine;
 /* ADDED BY ME FOR MUSIG2. */
 pub type Point = <EdwardsProjective as ProjectiveCurve>::Affine;
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default)]
 pub struct SecretKey<C: ProjectiveCurve> {
     pub secret_key: C::ScalarField,
     pub public_key: PublicKey<C>,
@@ -90,7 +90,7 @@ impl<C: ProjectiveCurve> ToBytes for SecretKey<C> {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default)]
 pub struct Signature<C: ProjectiveCurve> {
     pub prover_response: C::ScalarField,        // s - scalar representing signature proof
     pub verifier_challenge: [u8; 32],           // r - point on curve (usually just the x coordinate)
@@ -177,6 +177,7 @@ where
         Ok(signature)
     }
 
+    /* NOT USED */
     fn verify(
         parameters: &Self::Parameters,  // (dummy) needed because using crpto-primitives SignatureScheme
         pk: &Self::PublicKey,
@@ -430,7 +431,6 @@ impl KeyAggContext {
 }
 
 // TODO: MUST REMOVE DEBUG LATER
-#[derive(Debug)]
 pub struct SecNonce {
     pub(crate) k1: SecretKey<EdwardsProjective>,
     pub(crate) k2: SecretKey<EdwardsProjective>,
@@ -1195,7 +1195,7 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     final_nonce.serialize(&mut nonce_x_bytes);
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);
-    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message, poseidon_params);       // TODO: AVOID CLONE
+    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message, poseidon_params);
 
     // if has_even_Y(R):
     //   k = k1 + b*k2
@@ -1244,8 +1244,8 @@ where
     {
     let mut agg_pubkey_serialized = vec![];
     aggregated_pubkey.serialize(&mut agg_pubkey_serialized);
-    let mut bytes = [0u8; 32];
-    aggregated_pubkey.serialize(&mut bytes[..]);
+    // let mut bytes = [0u8; 32];
+    // aggregated_pubkey.serialize(&mut bytes[..]);
     // let agg_pubkey_copy = agg_pubkey_serialized.clone();
     // let hash: [u8; 32] = BIP0340_CHALLENGE_TAG_HASHER
     //     .clone()
@@ -1255,20 +1255,50 @@ where
     //     .finalize()
     //     .into();
 
-    let mut hash_input: Vec<u8> = Vec::new();
-    hash_input.extend_from_slice(final_nonce_xonly);
-    hash_input.extend_from_slice(&bytes);
-    hash_input.extend_from_slice(message.as_ref());
+    // let hash_input = final_nonce_xonly;
+    // let mut hash_input: Vec<u8> = Vec::new();
+    // hash_input.extend_from_slice(final_nonce_xonly);
+    // hash_input.extend_from_slice(&bytes);
+    // hash_input.extend_from_slice(message.as_ref());
     
+    // println!("HASH INPUT INSIDE TWEAK() {:?}", hash_input.len());       // length is 160
     // let poseidon_params = Poseidon::<ConstraintF<C>, PoseidonRoundParams<F>> {
     //     params: MyPoseidonParams::default(),
     //     round_keys: vec![],
     //     mds_matrix: vec![],     // TODO: generate mds matrix
     // };
-    let mut vector = vec![];
-    let hash = CRH::evaluate(poseidon_params, &hash_input).unwrap();      // TODO: hash output [u8;32] unclear. Originally just [u8].
-    hash.serialize(&mut vector);
-    S::from(MaybeScalar::from_be_bytes_mod_order(&vector))
+
+    println!("HASH INPUT INSIDE TWEAK() {:?}", final_nonce_xonly);
+    println!("HASH INPUT INSIDE TWEAK() {:?}", agg_pubkey_serialized);
+    println!("HASH INPUT INSIDE TWEAK() {:?}", message.as_ref());
+
+    let mut vector1 = vec![];
+    let mut vector2 = vec![];
+    let mut vector3 = vec![];
+
+    // println!("PARAMS INSIDE TWEAK {:?}", poseidon_params);
+
+    let hash1 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, final_nonce_xonly).unwrap();
+    println!("HASH1 INSIDE TWEAK {:?}", hash1);
+    let hash2 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, &agg_pubkey_serialized).unwrap();
+    println!("HASH2 INSIDE TWEAK {:?}", hash2);
+    let hash3 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, message.as_ref()).unwrap();
+    println!("HASH3 INSIDE TWEAK {:?}", hash3);
+    // Serialize each hash into its own vector
+    hash1.serialize(&mut vector1).unwrap();
+    hash2.serialize(&mut vector2).unwrap();
+    hash3.serialize(&mut vector3).unwrap();
+
+    // Concatenate the vectors
+    let mut final_vector = Vec::with_capacity(vector1.len() + vector2.len() + vector3.len());
+    final_vector.extend(vector1);
+    final_vector.extend(vector2);
+    final_vector.extend(vector3);
+
+    println!("VECTOR LENGTH {:?}", final_vector.len());
+
+    println!("FINAL VECTOR INSIDE TWEAK {:?}", final_vector);
+    S::from(MaybeScalar::from_be_bytes_mod_order(&final_vector))
 }
 
 
