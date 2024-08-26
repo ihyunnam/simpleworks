@@ -3,6 +3,7 @@ use ark_crypto_primitives::crh::CRHGadget as CRHGadgetTrait;
 use ark_crypto_primitives::crh::poseidon::sbox::PoseidonSbox;
 use ark_crypto_primitives::crh::poseidon::PoseidonRoundParams;
 use ark_crypto_primitives::crh::poseidon::{Poseidon, constraints::{PoseidonRoundParamsVar, CRHGadget, find_poseidon_ark_and_mds}};
+use simpleworks::schnorr_signature::schnorr_signature_verify_gadget::SigVerifyGadget;
 use simpleworks::schnorr_signature::SimpleSchnorrSignatureVar;
 use std::convert::TryInto;
 
@@ -25,7 +26,7 @@ use std::ops::Mul;
 use ark_relations::r1cs::Namespace;
 use ark_std::Zero;
 // use ark_crypto_primitives::crh::poseidon::{Poseidon, PoseidonRoundParams};
-use ark_crypto_primitives::signature::SigVerifyGadget;
+// use ark_crypto_primitives::signature::SigVerifyGadget;
 // use ark_crypto_primitives::{Error, SignatureScheme};
 use ark_ec::twisted_edwards_extended::{GroupAffine, GroupProjective};
 use ark_ec::{AffineCurve, ModelParameters, PairingEngine, ProjectiveCurve};
@@ -55,7 +56,7 @@ use ark_groth16::Groth16;
 // use std::borrow::Borrow;
 use simpleworks::schnorr_signature::
     {schnorr::{Schnorr, Parameters, PublicKey, Signature, KeyAggContext, FirstRound, SecondRound, PubNonce, PartialSignature},
-    // schnorr_signature_verify_gadget::SchnorrSignatureVerifyGadget,
+    schnorr_signature_verify_gadget::SchnorrSignatureVerifyGadget,
     public_key_var::PublicKeyVar,
     parameters_var::ParametersVar,
     signature_var::SignatureVar,
@@ -192,85 +193,44 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
         
         let end = start.elapsed();
         println!("time before verify {:?}", end);
-        let verification_point_wtns = UInt8::<ConstraintF<C>>::new_witness_vec (
-            cs.clone(),
-            &{
-                let start = Instant::now();
-                let signature = self.schnorr_sig.as_ref().unwrap_or(&default_sig);
-                let pubkey_affine = self.schnorr_apk.as_ref().unwrap_or(&default_pubkey);
-                let prover_response = signature.prover_response.clone();
 
-                let parameters = self.schnorr_params.unwrap_or(default_schnorr_param);
-                let end = start.elapsed();
-                println!("verify 1 {:?}", end);
-                
-                let start = Instant::now();
-                let mut agg_pubkey_serialized = [0u8; 32];
-                pubkey_affine.serialize(&mut agg_pubkey_serialized[..]);
-                let agg_pubkey_wtns = UInt8::<ConstraintF<C>>::new_witness_vec (
-                    cs.clone(),
-                    &agg_pubkey_serialized,
-                ).unwrap();
-                
-                let end = start.elapsed();
-                println!("verify 2 {:?}", end);
-                
-                let start = Instant::now();
-                
-                let rng = &mut OsRng;
-                let default_poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
-                    params: MyPoseidonParams::default(),
-                    round_keys: vec![<ConstraintF<C>>::rand(rng);455],            // 6 = width hardcoded
-                    mds_matrix: vec![vec![<ConstraintF<C>>::rand(rng);6];6],
-                };
-                
-                let poseidon_params_wtns = PoseidonRoundParamsVar::<ConstraintF<C>, MyPoseidonParams>::new_variable(
-                    cs.clone(),
-                    || Ok(self.poseidon_params.as_ref().unwrap_or(&default_poseidon_params)),
-                    AllocationMode::Witness,
-                )?;
-
-                let hash1 = CRHGadget::evaluate(&poseidon_params_wtns, &verifier_challenge_wtns).unwrap();
-                
-                let hash2 = CRHGadget::evaluate(&poseidon_params_wtns, &agg_pubkey_wtns).unwrap();
-                
-                let hash3 = CRHGadget::evaluate(&poseidon_params_wtns, &reconstructed_msg_wtns).unwrap();
-
-                let end = start.elapsed();
-                
-                let start = Instant::now();
-
-                let mut vector1 = vec![];
-                let mut vector2 = vec![];
-                let mut vector3 = vec![];
-
-                let hash1 = hash1.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
-                    
-                let hash2 = hash2.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
-                    
-                let hash3 = hash3.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
-
-                hash1.serialize(&mut vector1).unwrap();
-                hash2.serialize(&mut vector2).unwrap();
-                hash3.serialize(&mut vector3).unwrap();
-                let mut final_vector = Vec::with_capacity(vector1.len() + vector2.len() + vector3.len());
-                final_vector.extend(vector1.clone());
-                final_vector.extend(vector2.clone());
-                final_vector.extend(vector3.clone());
-
-                println!("FINAL VECTOR IN GADGET {:?}", final_vector);
-                let e = C::ScalarField::from_be_bytes_mod_order(final_vector.as_slice());
-                
-                let verification_point = parameters.generator.mul(prover_response).sub(pubkey_affine.mul(e));
-                let mut verification_point_bytes: Vec<u8> = vec![];
-                verification_point.serialize(&mut verification_point_bytes);
-                let end = start.elapsed();
-                println!("verify 4 {:?}", end);
-                verification_point_bytes
-            }
-        ).unwrap();
+        /* SCHNORR SIG VERIFY GADGET */
+        let default_poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
+            params: MyPoseidonParams::default(),
+            round_keys: vec![<ConstraintF<C>>::zero();455],            // 6 = width hardcoded
+            mds_matrix: vec![vec![<ConstraintF<C>>::zero();6];6],
+        };
         
-        let schnorr_verified = verification_point_wtns.is_eq(&verifier_challenge_wtns)?;
+        let poseidon_params_wtns = PoseidonRoundParamsVar::<ConstraintF<C>, MyPoseidonParams>::new_variable(
+            cs.clone(),
+            || Ok(self.poseidon_params.as_ref().unwrap_or(&default_poseidon_params)),
+            AllocationMode::Witness,
+        )?;
+
+        let schnorr_apk_wtns = PublicKeyVar::<C, GG>::new_variable(
+            cs.clone(),
+            || Ok(self.schnorr_apk.as_ref().unwrap_or(&default_pubkey)),
+            AllocationMode::Witness,
+        ).unwrap();
+
+        let schnorr_sig_wtns = SignatureVar::<C, GG>::new_variable(
+            cs.clone(),
+            || Ok(self.schnorr_sig.as_ref().unwrap_or(&default_sig)),
+            AllocationMode::Witness,
+        ).unwrap();
+
+        let mut h_vec = vec![0u8; 32];  // Vec<u8> avoids lifetime issues
+        let apk = self.schnorr_apk.as_ref().unwrap_or(&default_pubkey);
+        apk.serialize(&mut h_vec[..]).unwrap();
+
+        let schnorr_verified = SchnorrSignatureVerifyGadget::<C,GG>::verify(
+            cs.clone(),
+            &schnorr_param_const,
+            &schnorr_apk_wtns,
+            &reconstructed_msg_wtns,
+            &schnorr_sig_wtns,
+            poseidon_params_wtns,
+        ).unwrap();
 
         let end = start.elapsed();
         println!("time schnorr verify {:?}", end);
