@@ -306,7 +306,7 @@ fn compute_key_aggregation_coefficient<C: ProjectiveCurve>(
     MaybeScalar::<C>::from_be_bytes_mod_order(&hash.to_vec())
 }
 
-fn hash_pubkeys<C: ProjectiveCurve, P: std::borrow::Borrow<Point<C>>>(ordered_pubkeys: &[P]) -> [u8; 32] {
+fn hash_pubkeys<C: ProjectiveCurve>(ordered_pubkeys: &[Point<C>]) -> [u8; 32] {
     let mut h = KEYAGG_LIST_TAG_HASHER.clone();
     for pubkey in ordered_pubkeys {
         let mut bytes = [0u8; 32];
@@ -379,7 +379,7 @@ impl<C> KeyAggContext<C> where
         
         // println!("pk2 {:?}", pk2);
 
-        let pk_list_hash: [u8; 32] = hash_pubkeys::<C, std::borrow::Borrow<Point<C>>>>(&ordered_pubkeys);
+        let pk_list_hash: [u8; 32] = hash_pubkeys::<C>(&ordered_pubkeys);
         // println!("ORDERED PUBKEYS {:?}", ordered_pubkeys);      // ORDERS ARE CORRECT
         // println!("ORDERED PUBKEY POINT AT INF? {:?}", ordered_pubkeys[0].is_zero());
         // println!("ORDERED PUBKEY POINT AT INF? {:?}", ordered_pubkeys[1].is_zero());
@@ -390,7 +390,7 @@ impl<C> KeyAggContext<C> where
                 .iter()
                 .map(|&pubkey| {
                     let key_coeff =
-                        compute_key_aggregation_coefficient(&pk_list_hash, &pubkey, pk2);       // pk2 IS LOG PUBKEY
+                        compute_key_aggregation_coefficient::<C>(&pk_list_hash, &pubkey, pk2);       // pk2 IS LOG PUBKEY
                     (pubkey.mul(key_coeff).into_affine(), key_coeff)
                 })
                 .unzip();
@@ -894,7 +894,7 @@ C: ProjectiveCurve
 
         // let aggnonce = pubnonces.iter().sum();
         // println!("MY SECNONCE {:?}", self.secnonce);
-        let partial_signature = sign_partial_adaptor(
+        let partial_signature: PartialSignature<C> = sign_partial_adaptor::<_, PartialSignature<C>,C>(
             &self.key_agg_ctx,
             seckey,
             self.secnonce,
@@ -1204,7 +1204,7 @@ pub fn sign_partial_adaptor<S: From<MaybeScalar::<C>>, T: From<PartialSignature<
     final_nonce.serialize(&mut nonce_x_bytes);
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);
-    let e: MaybeScalar::<C> = compute_challenge_hash_tweak::<S,C>(&array, &aggregated_pubkey, &message, poseidon_params);
+    let e: MaybeScalar::<C> = compute_challenge_hash_tweak::<C::ScalarField,C>(&array, &aggregated_pubkey, &message, poseidon_params);
 
     // if has_even_Y(R):
     //   k = k1 + b*k2
@@ -1224,7 +1224,7 @@ pub fn sign_partial_adaptor<S: From<MaybeScalar::<C>>, T: From<PartialSignature<
     // s = k + e*a*d
     let partial_signature: C::ScalarField = secnonce_sum + (e * key_coeff * d);
 
-    verify_partial_adaptor(
+    verify_partial_adaptor::<C::ScalarField, C>(
         key_agg_ctx,
         partial_signature,
         aggregated_nonce,
@@ -1361,7 +1361,7 @@ pub fn verify_partial_adaptor<S: From<MaybeScalar::<C>>, C: ProjectiveCurve>(
     final_nonce.serialize(&mut nonce_x_bytes);
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
-    let e: MaybeScalar::<C> = compute_challenge_hash_tweak::<S,C>(&array, &aggregated_pubkey, &message, poseidon_params);
+    let e: MaybeScalar::<C> = compute_challenge_hash_tweak::<C::ScalarField,C>(&array, &aggregated_pubkey, &message, poseidon_params);
 
     // s * G == R + (g * gacc * e * a * P)
     // let challenge_parity = aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc;
@@ -1406,7 +1406,7 @@ pub fn aggregate_partial_adaptor_signatures<S: Into<PartialSignature<C>>, C: Pro
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
     // let nonce_x_bytes = final_nonce.x.serialize();
-    let e: MaybeScalar::<C> = compute_challenge_hash_tweak::<S,C>(&array, &aggregated_pubkey, &message, poseidon_params);
+    let e: MaybeScalar::<C> = compute_challenge_hash_tweak::<C::ScalarField,C>(&array, &aggregated_pubkey, &message, poseidon_params);
 
     let elem = e * key_agg_ctx.tweak_acc;
     // if aggregated_pubkey.parity() {  // NOTE: TOOK OUT PARITY CHECK
