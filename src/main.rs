@@ -3,6 +3,7 @@ use ark_crypto_primitives::crh::CRHGadget as CRHGadgetTrait;
 use ark_crypto_primitives::crh::poseidon::sbox::PoseidonSbox;
 use ark_crypto_primitives::crh::poseidon::PoseidonRoundParams;
 use ark_crypto_primitives::crh::poseidon::{Poseidon, constraints::{PoseidonRoundParamsVar, CRHGadget, find_poseidon_ark_and_mds}};
+use simpleworks::schnorr_signature::SimpleSchnorrSignatureVar;
 use std::convert::TryInto;
 
 // THIS IS WITHOUT AGGREGATE SCHNORR AND PUBLIC INPUTS
@@ -29,7 +30,7 @@ use ark_crypto_primitives::signature::SigVerifyGadget;
 use ark_ec::twisted_edwards_extended::{GroupAffine, GroupProjective};
 use ark_ec::{AffineCurve, ModelParameters, PairingEngine, ProjectiveCurve};
 use ark_ed_on_bls12_381::EdwardsParameters;
-use ark_ff::{BigInteger, BigInteger256, BitIteratorLE, Fp256, One, PrimeField};
+use ark_ff::{to_bytes, BigInteger, BigInteger256, BitIteratorLE, Fp256, One, PrimeField};
 // use ark_ec::{ProjectiveCurve};
 use ark_ff::{
     bytes::{FromBytes, ToBytes},
@@ -168,19 +169,27 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             salt: Some([0u8;32]),
         };
 
+        let schnorr_param_const = ParametersVar::<C,GG>::new_variable(
+            cs.clone(),
+            || Ok(self.schnorr_params.as_ref().unwrap_or(&default_schnorr_param)),
+            AllocationMode::Constant,
+        ).unwrap();
+        
         let default_sig = Signature::default();
-        let default_pubkey = PublicKey::<C>::default();
 
         let verifier_challenge_wtns = UInt8::<ConstraintF<C>>::new_witness_vec (
             cs.clone(),
-            &{
-                let signature = self.schnorr_sig.as_ref().unwrap_or(&default_sig);
-                signature.verifier_challenge
-            }
+            &self.schnorr_sig.as_ref().unwrap_or(&default_sig).verifier_challenge,
         ).unwrap();
 
-        // let mut hash_var: Vec<UInt8<ConstraintF<C>>> = verifier_challenge_wtns.clone();
+        SignatureVar::<C,GG>::new_variable(
+            cs.clone(),
+            || Ok(self.schnorr_sig.as_ref().unwrap_or(&default_sig)),
+            AllocationMode::Witness,
+        ).unwrap();
 
+        let default_pubkey = PublicKey::<C>::default();
+        
         let end = start.elapsed();
         println!("time before verify {:?}", end);
         let verification_point_wtns = UInt8::<ConstraintF<C>>::new_witness_vec (
@@ -188,10 +197,9 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             &{
                 let start = Instant::now();
                 let signature = self.schnorr_sig.as_ref().unwrap_or(&default_sig);
-                
                 let pubkey_affine = self.schnorr_apk.as_ref().unwrap_or(&default_pubkey);
                 let prover_response = signature.prover_response.clone();
-                // let verifier_challenge = signature.verifier_challenge.clone();
+
                 let parameters = self.schnorr_params.unwrap_or(default_schnorr_param);
                 let end = start.elapsed();
                 println!("verify 1 {:?}", end);
@@ -203,75 +211,52 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                     cs.clone(),
                     &agg_pubkey_serialized,
                 ).unwrap();
-                // hash_var.extend(agg_pubkey_wtns);
-                // hash_var.extend(reconstructed_msg_wtns);
-                // println!("HASH VAR LENGTH {:?}", hash_var.len());
+                
                 let end = start.elapsed();
                 println!("verify 2 {:?}", end);
-                // println!("hash_var {:?}", hash_var.value());
+                
                 let start = Instant::now();
-                // let b2s_params: Blake2sParametersVar = <Blake2sParametersVar as AllocVar<_, ConstraintF<C>>>::new_constant(
-                //     ConstraintSystemRef::None,
-                //     (),
-                // )?;
-
+                
                 let rng = &mut OsRng;
                 let default_poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
                     params: MyPoseidonParams::default(),
                     round_keys: vec![<ConstraintF<C>>::rand(rng);455],            // 6 = width hardcoded
                     mds_matrix: vec![vec![<ConstraintF<C>>::rand(rng);6];6],
                 };
-                // println!("DEFAULT POSEIDON PARAMS {:?}", Poseidon::<ConstraintF<C>, MyPoseidonParams>::default());
+                
                 let poseidon_params_wtns = PoseidonRoundParamsVar::<ConstraintF<C>, MyPoseidonParams>::new_variable(
                     cs.clone(),
                     || Ok(self.poseidon_params.as_ref().unwrap_or(&default_poseidon_params)),
                     AllocationMode::Witness,
                 )?;
-                println!("HASH1 INPUT INSIDE GADGET {:?}", verifier_challenge_wtns.value());        // INPUTS ARE SAME. JUST THEIR HASHES ARE DIFFERENT.
-                println!("HASH2 INPUT INSIDE GADGET {:?}", agg_pubkey_wtns.value());
-                println!("HASH3 INPUT INSIDE GADGET {:?}", reconstructed_msg_wtns.value());
-                // println!("PARAMS INSIDE GADGET {:?}", poseidon_params_wtns.params);
 
                 let hash1 = CRHGadget::evaluate(&poseidon_params_wtns, &verifier_challenge_wtns).unwrap();
-                // Fp256<ark_bls12_381::FrParameters>;
-                // let hello: <<C as ProjectiveCurve>::Affine as AffineCurve>::BaseField = hash1.value().unwrap();
-                println!("HASH1 INSIDE GADGET {:?}", hash1.value());
+                
                 let hash2 = CRHGadget::evaluate(&poseidon_params_wtns, &agg_pubkey_wtns).unwrap();
-                println!("HASH2 INSIDE GADGET {:?}", hash2.value());
+                
                 let hash3 = CRHGadget::evaluate(&poseidon_params_wtns, &reconstructed_msg_wtns).unwrap();
-                println!("HASH3 INSIDE GADGET {:?}", hash3.value());
 
-                // let hash = CRHGadget::evaluate(&poseidon_params, &hash_var)?;
                 let end = start.elapsed();
-                println!("verify 3 {:?}", end);
+                
                 let start = Instant::now();
 
-                // let mut vector = vec![];
-                // hash.serialize(&mut vector);
                 let mut vector1 = vec![];
                 let mut vector2 = vec![];
                 let mut vector3 = vec![];
 
                 let hash1 = hash1.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
-                    // .into_iter()
-                    // .map(|el| el.value().unwrap_or(0))
-                    // .collect();
+                    
                 let hash2 = hash2.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
-                    // .into_iter()
-                    // .map(|el| el.value().unwrap_or(0))
-                    // .collect();
+                    
                 let hash3 = hash3.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
-                    // .into_iter()
-                    // .map(|el| el.value().unwrap_or(0))
-                    // .collect();
 
                 hash1.serialize(&mut vector1).unwrap();
                 hash2.serialize(&mut vector2).unwrap();
                 hash3.serialize(&mut vector3).unwrap();
                 let mut final_vector = Vec::with_capacity(vector1.len() + vector2.len() + vector3.len());
-                final_vector.extend(vector1);
-                final_vector.extend(vector2);
-                final_vector.extend(vector3);
+                final_vector.extend(vector1.clone());
+                final_vector.extend(vector2.clone());
+                final_vector.extend(vector3.clone());
 
                 println!("FINAL VECTOR IN GADGET {:?}", final_vector);
                 let e = C::ScalarField::from_be_bytes_mod_order(final_vector.as_slice());
@@ -285,7 +270,6 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             }
         ).unwrap();
         
-        // Dummy return value
         let schnorr_verified = verification_point_wtns.is_eq(&verifier_challenge_wtns)?;
 
         let end = start.elapsed();
@@ -329,29 +313,19 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                 let parameters = self.pedersen_params.as_ref().unwrap_or(&default_param);
                 let randomness = self.pedersen_rand.as_ref().unwrap_or(&default_rand);
 
-                // let pedersen_randomness = PedersenRandomnessVar::<ConstraintF<C>>::new_variable(
-                //     cs.clone(),
-                //     || Ok(randomness),
-                //     AllocationMode::Witness,
-                // ).unwrap();
-
-                // let pedersen_params = PedersenParametersVar::<C,GG>::new_variable(
-                //     cs.clone(),
-                //     || Ok(parameters),
-                //     AllocationMode::Constant,
-                // ).unwrap();
-
                 let mut h_vec = vec![0u8; 32];  // Vec<u8> avoids lifetime issues
-                let schnorr_apk_var = UInt8::<ConstraintF<C>>::new_witness_vec (
-                    cs.clone(),
-                    &{   
-                        let apk = self.schnorr_apk.as_ref().unwrap_or(&default_pubkey);
-                        apk.serialize(&mut h_vec[..]).unwrap();
+                let apk = self.schnorr_apk.as_ref().unwrap_or(&default_pubkey);
+                apk.serialize(&mut h_vec[..]).unwrap();
+                // let schnorr_apk_var = UInt8::<ConstraintF<C>>::new_witness_vec (
+                //     cs.clone(),
+                //     &{   
+                //         let apk = self.schnorr_apk.as_ref().unwrap_or(&default_pubkey);
+                //         apk.serialize(&mut h_vec[..]).unwrap();
 
-                        h_vec
-                    }
-                ).unwrap();
-                let input = schnorr_apk_var.value().unwrap_or(vec![]);
+                //         h_vec
+                //     }
+                // ).unwrap();
+                let input = h_vec;
                 
                 // If the input is too long, return an error.
                 if input.len() > W::WINDOW_SIZE * W::NUM_WINDOWS {
@@ -402,7 +376,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
         // println!("time 4 {:?}", end);
 
         // let start = Instant::now();
-        let computed_commit_bytes = computed_commit.to_bytes().unwrap();
+        // let computed_commit_bytes = computed_commit.to_bytes().unwrap();
 
         // println!("COMPUTED COMMIT BYTES {:?}", computed_commit_bytes);
 
@@ -599,6 +573,7 @@ fn main() {
         .collect();
 
     let last_sig = signatures.pop().unwrap();
+    println!("LAST SIG OUTSIDE {:?}", last_sig);
 
     // Sig should be verifiable as a standard schnorr signature
     let aggregated_pubkey: PublicKey<C> = key_agg_ctx.aggregated_pubkey();

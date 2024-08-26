@@ -90,7 +90,7 @@ impl<C: ProjectiveCurve> ToBytes for SecretKey<C> {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]        // TODO: MUST REMOVE DEBUG
 pub struct Signature<C: ProjectiveCurve> {
     pub prover_response: C::ScalarField,        // s - scalar representing signature proof
     pub verifier_challenge: [u8; 32],           // r - point on curve (usually just the x coordinate)
