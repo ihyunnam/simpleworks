@@ -817,7 +817,7 @@ C: ProjectiveCurve
             // .ok_or_else(|| SignerIndexError::new(signer_index, key_agg_ctx.ordered_pubkeys.len()))?;
         let aggregated_pubkey: Point<C> = key_agg_ctx.aggregated_pubkey();
 
-        let secnonce = SecNonce::build(nonce_seed)
+        let secnonce: SecNonce<C> = SecNonce::build(nonce_seed)
             .with_pubkey(signer_pubkey)
             .with_aggregated_pubkey(aggregated_pubkey)
             // .with_extra_input(&(signer_index as u32).to_be_bytes())  // SEEMS EXTRA
@@ -1083,8 +1083,8 @@ C: ProjectiveCurve
             .map(|pubnonce| (pubnonce.borrow().R1, pubnonce.borrow().R2))
             .unzip();
 
-        let sum_r1 = r1s.into_iter().fold(Point::<C>::zero(), |acc, point| acc.add(&point));
-        let sum_r2 = r2s.into_iter().fold(Point::<C>::zero(), |acc, point| acc.add(&point));
+        let sum_r1 = r1s.into_iter().fold(Point::<C>::zero(), |acc, point| acc.add(point));     // NOTE: Changed from &point to point
+        let sum_r2 = r2s.into_iter().fold(Point::<C>::zero(), |acc, point| acc.add(point));
 
         AggNonce {
             R1: sum_r1,        // result is MaybePoint::<C>
@@ -1222,7 +1222,7 @@ pub fn sign_partial_adaptor<S: From<MaybeScalar::<C>>, T: From<PartialSignature<
     // }
 
     // s = k + e*a*d
-    let partial_signature = secnonce_sum + (e * key_coeff * d);
+    let partial_signature: C::ScalarField = secnonce_sum + (e * key_coeff * d);
 
     verify_partial_adaptor(
         key_agg_ctx,
