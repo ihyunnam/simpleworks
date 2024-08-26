@@ -149,8 +149,8 @@ where
         let verification_point = parameters.generator.value().unwrap_or(C::default()).into_affine().mul(prover_response_fe).sub(public_key.pub_key.value().unwrap_or(C::default()).into_affine().mul(e)).into_affine();
         let mut verification_point_bytes: Vec<u8> = vec![];
         verification_point.serialize(&mut verification_point_bytes);
-        let end = start.elapsed();
-        println!("verify 4 {:?}", end);
+        // let end = start.elapsed();
+        // println!("verify 4 {:?}", end);
         
         let mut verification_point_wtns: Vec<UInt8<ConstraintF<C>>> = vec![];
         for coord in verification_point_bytes {

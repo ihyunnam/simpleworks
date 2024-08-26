@@ -193,8 +193,8 @@ where
         // kG = sG + eY
         // so we first solve for kG.
 
-        println!("PROVER RESPONSE {:?}", prover_response);
-        println!("VERIFIER CHALLENGE {:?}", verifier_challenge);
+        // println!("PROVER RESPONSE {:?}", prover_response);
+        // println!("VERIFIER CHALLENGE {:?}", verifier_challenge);
         /* THIS IS compute_challenge_hash_tweak() */
         let mut agg_pubkey_serialized = [0u8; 32];
         pk.serialize(&mut agg_pubkey_serialized[..]);
@@ -211,12 +211,12 @@ where
         // println!("HASH VALUE {:?}", hash);
         let e = C::ScalarField::from_be_bytes_mod_order(&hash);
         
-        println!("GENERATOR {:?}", parameters.generator);
+        // println!("GENERATOR {:?}", parameters.generator);
         let verification_point = parameters.generator.mul(*prover_response).sub(pk.mul(e)).into_affine();
         let mut verification_point_bytes = vec![];
         verification_point.serialize(&mut verification_point_bytes);
 
-        println!("VERIFICATION POINT BYTES {:?}", verification_point_bytes);
+        // println!("VERIFICATION POINT BYTES {:?}", verification_point_bytes);
 
         Ok(verification_point_bytes == verifier_challenge)
     }
@@ -391,16 +391,16 @@ impl KeyAggContext {
                     (pubkey.mul(key_coeff).into_affine(), key_coeff)
                 })
                 .unzip();
-        println!("EFFECTIVE PUBKEY POINT AT INF? {:?}", effective_pubkeys[0].is_zero());
-        println!("EFFECTIVE PUBKEY POINT AT INF? {:?}", effective_pubkeys[1].is_zero());
+        // println!("EFFECTIVE PUBKEY POINT AT INF? {:?}", effective_pubkeys[0].is_zero());
+        // println!("EFFECTIVE PUBKEY POINT AT INF? {:?}", effective_pubkeys[1].is_zero());
 
-        println!("EFFECTIVE PUBKEYS {:?}", effective_pubkeys);
-        println!("KEY COEFFICIENTS {:?}", key_coefficients);
+        // println!("EFFECTIVE PUBKEYS {:?}", effective_pubkeys);
+        // println!("KEY COEFFICIENTS {:?}", key_coefficients);
 
         // let aggregated_pubkey = MaybePoint::sum(&effective_pubkeys);
         let aggregated_pubkey = effective_pubkeys.clone().into_iter().fold(GroupAffine::default(), |acc, item| acc + &item);
         // NOTE: ORIGINAL IMPLEMENTATION JUST 'FILTERS OUT' POINTS AT INFINITY BEFORE SUMMING
-        println!("AGGREGATED PUBKEY POINT AT INF? {:?}", aggregated_pubkey.is_zero());
+        // println!("AGGREGATED PUBKEY POINT AT INF? {:?}", aggregated_pubkey.is_zero());
         let pubkey_indexes = HashMap::from_iter(
             ordered_pubkeys
                 .iter()
@@ -1134,7 +1134,7 @@ impl AggNonce {
         //     MaybePoint::Valid(p) => p,
         // })
 
-        println!("AGGNONCE SUM {:?}", aggnonce_sum);
+        // println!("AGGNONCE SUM {:?}", aggnonce_sum);
         aggnonce_sum
     }
 }
@@ -1268,9 +1268,9 @@ where
     //     mds_matrix: vec![],     // TODO: generate mds matrix
     // };
 
-    println!("HASH INPUT INSIDE TWEAK() {:?}", final_nonce_xonly);
-    println!("HASH INPUT INSIDE TWEAK() {:?}", agg_pubkey_serialized);
-    println!("HASH INPUT INSIDE TWEAK() {:?}", message.as_ref());
+    // println!("HASH INPUT INSIDE TWEAK() {:?}", final_nonce_xonly);
+    // println!("HASH INPUT INSIDE TWEAK() {:?}", agg_pubkey_serialized);
+    // println!("HASH INPUT INSIDE TWEAK() {:?}", message.as_ref());
 
     let mut vector1 = vec![];
     let mut vector2 = vec![];
@@ -1279,11 +1279,11 @@ where
     // println!("PARAMS INSIDE TWEAK {:?}", poseidon_params);
 
     let hash1 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, final_nonce_xonly).unwrap();
-    println!("HASH1 INSIDE TWEAK {:?}", hash1);
+    // println!("HASH1 INSIDE TWEAK {:?}", hash1);
     let hash2 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, &agg_pubkey_serialized).unwrap();
-    println!("HASH2 INSIDE TWEAK {:?}", hash2);
+    // println!("HASH2 INSIDE TWEAK {:?}", hash2);
     let hash3 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, message.as_ref()).unwrap();
-    println!("HASH3 INSIDE TWEAK {:?}", hash3);
+    // println!("HASH3 INSIDE TWEAK {:?}", hash3);
     // Serialize each hash into its own vector
     hash1.serialize(&mut vector1).unwrap();
     hash2.serialize(&mut vector2).unwrap();
@@ -1295,9 +1295,9 @@ where
     final_vector.extend(vector2);
     final_vector.extend(vector3);
 
-    println!("VECTOR LENGTH {:?}", final_vector.len());
+    // println!("VECTOR LENGTH {:?}", final_vector.len());
 
-    println!("FINAL VECTOR INSIDE TWEAK {:?}", final_vector);
+    // println!("FINAL VECTOR INSIDE TWEAK {:?}", final_vector);
     S::from(MaybeScalar::from_be_bytes_mod_order(&final_vector))
 }
 
