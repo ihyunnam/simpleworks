@@ -124,38 +124,14 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
     // Vec<u8>: Borrow<<C as ProjectiveCurve>::BaseField>,
 {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
-        let start = Instant::now();
-
         let affine_default = C::Affine::default();
         let h_default = ConstraintF::<C>::default();
-
-        /* Different formats but this shows that h_i is hash containing v_i encryption key. */
-        let elgamal_key_wtns = ElgamalPublicKeyVar::<C,GG>::new_variable(
-            cs.clone(),
-            || Ok(self.elgamal_key.as_ref().unwrap_or(&affine_default)),
-            AllocationMode::Witness,
-        ).unwrap();
-
-        let elgamal_key_wtns_for_h = UInt8::<ConstraintF<C>>::new_witness_vec(
-            cs.clone(),
-            &{
-                let mut elgamal_bytes = vec![];
-                let elgamal_key = self.elgamal_key.as_ref().unwrap_or(&affine_default);
-                elgamal_key.serialize(&mut elgamal_bytes);
-                // println!("LENGTH {:?}", elgamal_bytes.len());
-                elgamal_bytes
-            }
-        ).unwrap();
-
-        // let mut h_cur_bytes = vec![];
-        // let h_cur_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
-        //     cs.clone(),
-        //     &{
-        //         let h_prev = self.h_cur.as_ref().unwrap_or(&ConstraintF::<C>::default());
-        //         h_prev.write(h_cur_bytes);
-        //         h_cur_bytes
-        //     }
-        // ).unwrap().into()?;
+        let default_sig = Signature::default();
+        let default_pubkey = PublicKey::<C>::default();
+        let default_schnorr_param: Parameters<C> = Parameters::<C> {
+            generator: <C as ProjectiveCurve>::Affine::default(),
+            salt: Some([0u8;32]),
+        };
 
         let first_login_wtns = Boolean::<ConstraintF<C>>::new_witness(cs.clone(), || {
             Ok(self.first_login.as_ref().unwrap_or(&false))
@@ -183,21 +159,12 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                 msg
             }
         ).unwrap();
-        let start = Instant::now();
-        let default_schnorr_param: Parameters<C> = Parameters::<C> {
-            generator: <C as ProjectiveCurve>::Affine::default(),
-            salt: Some([0u8;32]),
-        };
 
         let schnorr_param_const = ParametersVar::<C,GG>::new_variable(
             cs.clone(),
             || Ok(self.schnorr_params.as_ref().unwrap_or(&default_schnorr_param)),
             AllocationMode::Constant,
         ).unwrap();
-        
-        let default_sig = Signature::default();
-
-        let default_pubkey = PublicKey::<C>::default();
 
         /* SCHNORR SIG VERIFY GADGET */
         let default_poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
@@ -236,7 +203,6 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             &mut poseidon_params_wtns,
         ).unwrap();
 
-        // println!("verified {:?}", schnorr_verified.value());
         let end = start.elapsed();
         println!("Schnorr verify time {:?}", end);
         
@@ -244,30 +210,35 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
 
         verified_select.enforce_equal(&Boolean::TRUE)?;
         
+        let mut cur_input = vec![];
+        let mut elgamal_key_bytes = vec![];
         let computed_hash_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
             cs.clone(),
             &{
                 let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&default_poseidon_params);
-                let mut cur_input = vec![];
+                // let mut cur_input = vec![];
                 let elgamal_key = self.elgamal_key.as_ref().unwrap_or(&affine_default);
-                let mut elgamal_key_bytes = vec![];
+                // let mut elgamal_key_bytes = vec![];
                 elgamal_key.serialize(&mut elgamal_key_bytes);
                 cur_input.extend_from_slice(&elgamal_key_bytes);
                 cur_input.extend_from_slice(&[*self.i.as_ref().unwrap_or(&0)]);
                 let result = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &cur_input).unwrap();
                 let mut result_vec = vec![];
-                result.write(&mut result_vec);
+                // result.clear();
+                result.serialize(&mut result_vec);
                 result_vec
             },
         ).unwrap();
 
+        cur_input.clear();
+        elgamal_key_bytes.clear();
         let computed_prev_hash_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
             cs.clone(),
             &{
                 let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&default_poseidon_params);
-                let mut prev_input = vec![];
+                // let mut prev_input = vec![];
                 let elgamal_key = self.elgamal_key.as_ref().unwrap_or(&affine_default);
-                let mut elgamal_key_bytes = vec![];
+                // let mut elgamal_key_bytes = vec![];
                 elgamal_key.serialize(&mut elgamal_key_bytes);
 
                 let i_value = self.i.as_ref().unwrap_or(&0);
@@ -276,13 +247,13 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                     &UInt8::<ConstraintF<C>>::constant(0),
                     &UInt8::<ConstraintF<C>>::constant(i_value.checked_sub(1).unwrap_or(0)),   // both branches run
                 )?;
-                
-                prev_input.extend_from_slice(&elgamal_key_bytes);
-                prev_input.extend_from_slice(&[selected_i_prev.value().unwrap()]);
-                let result = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &prev_input).unwrap();
-                let mut result_vec = vec![];
-                result.serialize(&mut result_vec);
-                result_vec
+
+                cur_input.extend_from_slice(&elgamal_key_bytes);
+                cur_input.extend_from_slice(&[selected_i_prev.value().unwrap()]);
+                elgamal_key_bytes.clear();
+                let result = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &cur_input).unwrap();
+                result.serialize(&mut elgamal_key_bytes);
+                elgamal_key_bytes
             },
         ).unwrap();
 
@@ -294,7 +265,6 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                 h_cur.write(&mut h_cur_vec);
                 h_cur_vec
             },
-            // AllocationMode::Witness,
         ).unwrap();
 
         let h_prev_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
@@ -305,7 +275,6 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                 h_prev.write(&mut h_prev_vec);
                 h_prev_vec
             },
-            // AllocationMode::Witness,
         ).unwrap();
 
         computed_hash_wtns.enforce_equal(&h_cur_wtns);
@@ -316,9 +285,6 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
 }
 
 fn main() {
-    // let cs: ConstraintSystemRef<ConstraintF<C>> = ConstraintSystem::new_ref();
-    // cs.set_mode(SynthesisMode::Prove{construct_matrices: true});
-
     println!("Entering main.");
     let rng = &mut OsRng;
         
@@ -345,37 +311,33 @@ fn main() {
     let mut prev_input = vec![];
     prev_input.extend_from_slice(&elgamal_key_bytes);
     prev_input.extend_from_slice(&[i_prev]);     // Later, resize i_prev and pad with 0s to support larger index numbers
-    // println!("LENGTH {:?}", elgamal_key_bytes.len());
     
     let mut h_prev_bytes = vec![];
     let h_prev = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &prev_input).unwrap();
-    h_prev.write(&mut h_prev_bytes);
+    h_prev.serialize(&mut h_prev_bytes);
 
     let i: u8 = 10;
-    // let mut i_vec = vec![i];
     let mut cur_input = vec![];
     cur_input.extend_from_slice(&elgamal_key_bytes);
     cur_input.extend_from_slice(&[i]);
-    // i_vec.resize(elgamal_key_bytes.len(), 0u8);
-    println!("CUR INPUT OUTSIDE {:?}", cur_input);
     let h_cur = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &cur_input).unwrap();
 
     let plaintext = JubJub::rand(rng).into_affine();
     let v_prev = MyEnc::encrypt(&elgamal_param, &elgamal_key, &plaintext, &elgamal_rand).unwrap();
     let mut v_0_bytes = vec![];    // TODO: unify length to check partition later
-    // let mut v_0_y_bytes = vec![];
-    let mut v_1_bytes = vec![];
-    // let mut v_1_y_bytes = vec![];
+    // let mut v_1_bytes = vec![];
 
     v_prev.0.serialize(&mut v_0_bytes).unwrap();
-    v_prev.1.serialize(&mut v_1_bytes).unwrap();
+    
     let mut msg = vec![];
     
     // NOTE: msg ends up being 224 bytes.
     msg.extend_from_slice(&h_prev_bytes);
     msg.extend_from_slice(&v_0_bytes);        // TODO: check partitions too
+    v_0_bytes.clear();
+    v_prev.1.serialize(&mut v_0_bytes).unwrap();
     // msg.extend_from_slice(&v_0_y_bytes);
-    msg.extend_from_slice(&v_1_bytes);
+    msg.extend_from_slice(&v_0_bytes);
     // msg.extend_from_slice(&v_1_y_bytes);
     // println!("schnorr msg from outside: {:?}", msg);
 

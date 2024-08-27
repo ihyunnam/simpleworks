@@ -1245,26 +1245,25 @@ where
     {
     let mut agg_pubkey_serialized = vec![];
     aggregated_pubkey.serialize(&mut agg_pubkey_serialized);
-    let mut vector1 = vec![];
-    let mut vector2 = vec![];
-    let mut vector3 = vec![];
+    
+    let mut final_vector = vec![];
+    let mut temp_vector = vec![];
 
     let hash1 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, final_nonce_xonly).unwrap();
     let hash2 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, &agg_pubkey_serialized).unwrap();
     let hash3 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, message.as_ref()).unwrap();
-    hash1.serialize(&mut vector1).unwrap();
-    hash2.serialize(&mut vector2).unwrap();
-    hash3.serialize(&mut vector3).unwrap();
-
-    // Concatenate the vectors
-    let mut final_vector = Vec::with_capacity(vector1.len() + vector2.len() + vector3.len());
-    final_vector.extend(vector1);
-    final_vector.extend(vector2);
-    final_vector.extend(vector3);
+    hash1.serialize(&mut temp_vector).unwrap();
+    final_vector.extend(&temp_vector);
+    temp_vector.clear();
+    hash2.serialize(&mut temp_vector).unwrap();
+    final_vector.extend(&temp_vector);
+    temp_vector.clear();
+    hash3.serialize(&mut temp_vector).unwrap();
+    final_vector.extend(&temp_vector);
+    temp_vector.clear();
 
     S::from(MaybeScalar::from_be_bytes_mod_order(&final_vector))
 }
-
 
 /// Verify a partial signature, usually from an untrusted co-signer,
 /// which has been encrypted under an adaptor point.
