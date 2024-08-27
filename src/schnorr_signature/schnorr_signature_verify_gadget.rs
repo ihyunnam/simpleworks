@@ -79,11 +79,10 @@ where
         signature: &Self::SignatureVar,
         poseidon_params: &PoseidonRoundParamsVar<ConstraintF<C>, MyPoseidonParams>,
     ) -> Result<Boolean<ConstraintF<C>>, SynthesisError> {
-        let start = Instant::now();
         let prover_response = signature.prover_response.clone();
         let verifier_challenge = signature.verifier_challenge.value().unwrap_or(vec![0u8;32]).clone();
 
-        let poseidon_params = poseidon_params.params.clone();
+        let poseidon_params = &poseidon_params.params;
 
         let pubkey_affine = public_key.pub_key.value().unwrap_or(C::default()).into_affine();
         let mut agg_pubkey_serialized = vec![];
@@ -91,37 +90,33 @@ where
 
         let message = message.value().unwrap_or(vec![0u8;96]);
         
-        let hash1 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &verifier_challenge).unwrap();
-        let hash2 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &agg_pubkey_serialized).unwrap();
-        let hash3 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &message).unwrap();
+        let hash1 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(poseidon_params, &verifier_challenge).unwrap();
+        let hash2 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(poseidon_params, &agg_pubkey_serialized).unwrap();
+        let hash3 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(poseidon_params, &message).unwrap();
 
-        let mut vector1 = vec![];
-        let mut vector2 = vec![];
-        let mut vector3 = vec![];
+        let mut final_vector = vec![];
+        let mut temp_vector = vec![];
+        hash1.serialize(&mut temp_vector).unwrap();
+        final_vector.extend(&temp_vector);
+        temp_vector.clear();
+        hash2.serialize(&mut temp_vector).unwrap();
+        final_vector.extend(&temp_vector);
+        temp_vector.clear();
+        hash3.serialize(&mut temp_vector).unwrap();
+        final_vector.extend(&temp_vector);
+        temp_vector.clear();
 
         let mut reader = Cursor::new(prover_response.value().unwrap_or([0u8;32].to_vec()));
-
-        // Deserialize the bytes back into an affine point
         let prover_response_fe = C::ScalarField::deserialize(&mut reader).unwrap();
-
-        hash1.serialize(&mut vector1).unwrap();
-        hash2.serialize(&mut vector2).unwrap();
-        hash3.serialize(&mut vector3).unwrap();
-
-        let mut final_vector = Vec::with_capacity(vector1.len() + vector2.len() + vector3.len());
-        final_vector.extend(vector1.clone());
-        final_vector.extend(vector2.clone());
-        final_vector.extend(vector3.clone());        
 
         let e = C::ScalarField::from_be_bytes_mod_order(final_vector.as_slice()); 
 
         let verification_point = parameters.generator.value().unwrap_or(C::default()).into_affine().mul(prover_response_fe).sub(public_key.pub_key.value().unwrap_or(C::default()).into_affine().mul(e)).into_affine();
-        let mut verification_point_bytes: Vec<u8> = vec![];
-        verification_point.serialize(&mut verification_point_bytes);            // TODO: consider using write() instead of serialize()
+        // let mut verification_point_bytes: Vec<u8> = vec![];
+        verification_point.serialize(&mut temp_vector);            // Reuse temp_vector to minimize alloc
 
-        
         let mut verification_point_wtns: Vec<UInt8<ConstraintF<C>>> = vec![];
-        for coord in verification_point_bytes {
+        for coord in temp_vector {
             verification_point_wtns.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
         }
         

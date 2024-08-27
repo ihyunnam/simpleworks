@@ -197,17 +197,6 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
         
         let default_sig = Signature::default();
 
-        let verifier_challenge_wtns = UInt8::<ConstraintF<C>>::new_witness_vec (
-            cs.clone(),
-            &self.schnorr_sig.as_ref().unwrap_or(&default_sig).verifier_challenge,
-        ).unwrap();
-
-        SignatureVar::<C,GG>::new_variable(
-            cs.clone(),
-            || Ok(self.schnorr_sig.as_ref().unwrap_or(&default_sig)),
-            AllocationMode::Witness,
-        ).unwrap();
-
         let default_pubkey = PublicKey::<C>::default();
 
         /* SCHNORR SIG VERIFY GADGET */
@@ -223,7 +212,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             AllocationMode::Witness,
         )?;
 
-        let schnorr_apk_wtns = PublicKeyVar::<C, GG>::new_variable(
+        let schnorr_apk_input = PublicKeyVar::<C, GG>::new_variable(
             cs.clone(),
             || Ok(self.schnorr_apk.as_ref().unwrap_or(&default_pubkey)),
             AllocationMode::Input,          // NOTE: this should be witness when RP is verifying circuit
@@ -235,57 +224,25 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             AllocationMode::Witness,
         ).unwrap();
 
-        let mut h_vec = vec![0u8; 32];  // Vec<u8> avoids lifetime issues
-        let apk = self.schnorr_apk.as_ref().unwrap_or(&default_pubkey);
-        apk.serialize(&mut h_vec[..]).unwrap();
-
-        let end = start.elapsed();
-        println!("Various variable declaration {:?}", end);
+        // let end = start.elapsed();
+        // println!("Various variable declaration {:?}", end);
         let start = Instant::now();
         let schnorr_verified = SchnorrSignatureVerifyGadget::<C,GG>::verify(
             cs.clone(),
             &schnorr_param_const,
-            &schnorr_apk_wtns,
+            &schnorr_apk_input,
             &reconstructed_msg_wtns,
             &schnorr_sig_wtns,
             &mut poseidon_params_wtns,
         ).unwrap();
 
-        println!("verified {:?}", schnorr_verified.value());
+        // println!("verified {:?}", schnorr_verified.value());
         let end = start.elapsed();
         println!("Schnorr verify time {:?}", end);
         
         let verified_select: Boolean<ConstraintF<C>> = first_login_wtns.select(&Boolean::TRUE, &schnorr_verified)?;
 
         verified_select.enforce_equal(&Boolean::TRUE)?;
-        
-        // let i_prev_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(          // VERIFY USED TO FAIL BUT WORKS NOW
-        //     cs.clone(),
-        //     &{
-        //         let i_value = self.i.as_ref().unwrap_or(&0);
-        //         let selected_i_prev = UInt8::<ConstraintF<C>>::conditionally_select(
-        //             &Boolean::<ConstraintF<C>>::constant(*i_value == 0),
-        //             &UInt8::<ConstraintF<C>>::constant(0),
-        //             &UInt8::<ConstraintF<C>>::constant(i_value.checked_sub(1).unwrap_or(0)),   // both branches run
-        //         )?;
-        //         [selected_i_prev.value()?]
-        //     }
-        // ).unwrap();
-
-        let i_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(           // VERIFY FAILS
-            cs.clone(),
-            &[*self.i.as_ref().unwrap_or(&0)]
-        ).unwrap();
-
-        // let mut cur_input = vec![];
-        // cur_input.extend_from_slice(&elgamal_key_wtns_for_h);
-        // cur_input.extend_from_slice(&i_wtns);
-
-        // let mut prev_input = vec![];
-        // prev_input.extend_from_slice(&elgamal_key_wtns_for_h);
-        // prev_input.extend_from_slice(&i_prev_wtns);
-        
-        // let computed_hash_wtns: FpVar<ConstraintF<C>> = <CRHGadget<ConstraintF<C>, MyPoseidonParams> as CRHGadgetTrait::<CRH<ConstraintF<C>, MyPoseidonParams>, ConstraintF<C>>>::evaluate(&mut poseidon_params_wtns, &cur_input).unwrap();
         
         let computed_hash_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
             cs.clone(),
@@ -302,7 +259,6 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                 result.write(&mut result_vec);
                 result_vec
             },
-            // AllocationMode::Witness,
         ).unwrap();
 
         let computed_prev_hash_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
@@ -315,13 +271,12 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                 elgamal_key.serialize(&mut elgamal_key_bytes);
 
                 let i_value = self.i.as_ref().unwrap_or(&0);
-                // let selected_i_prev = Boolean::constant(*i_value == 0).select(&vec![0], &vec![i_value.checked_sub(1).unwrap_or(0)]);
                 let selected_i_prev = UInt8::<ConstraintF<C>>::conditionally_select(
                     &Boolean::<ConstraintF<C>>::constant(*i_value == 0),
                     &UInt8::<ConstraintF<C>>::constant(0),
                     &UInt8::<ConstraintF<C>>::constant(i_value.checked_sub(1).unwrap_or(0)),   // both branches run
                 )?;
-
+                
                 prev_input.extend_from_slice(&elgamal_key_bytes);
                 prev_input.extend_from_slice(&[selected_i_prev.value().unwrap()]);
                 let result = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &prev_input).unwrap();
@@ -329,7 +284,6 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                 result.serialize(&mut result_vec);
                 result_vec
             },
-            // AllocationMode::Witness,
         ).unwrap();
 
         let h_cur_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
