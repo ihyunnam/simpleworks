@@ -97,7 +97,7 @@ where
 
         let pubkey_affine = public_key.pub_key.value().unwrap_or(C::default()).into_affine();
         let mut agg_pubkey_serialized = vec![];
-        pubkey_affine.serialize(&mut agg_pubkey_serialized[..]);
+        pubkey_affine.serialize(&mut agg_pubkey_serialized);
 
         let mut hash2_var = vec![];
         for coord in agg_pubkey_serialized {

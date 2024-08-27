@@ -242,72 +242,119 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
         let end = start.elapsed();
         println!("Various variable declaration {:?}", end);
         let start = Instant::now();
-        // let schnorr_verified = SchnorrSignatureVerifyGadget::<C,GG>::verify(
-        //     cs.clone(),
-        //     &schnorr_param_const,
-        //     &schnorr_apk_wtns,
-        //     &reconstructed_msg_wtns,
-        //     &schnorr_sig_wtns,
-        //     &mut poseidon_params_wtns,
-        // ).unwrap();
-
-        // let end = start.elapsed();
-        // println!("Schnorr verify time {:?}", end);
-        
-        // let verified_select: Boolean<ConstraintF<C>> = first_login_wtns.select(&Boolean::TRUE, &schnorr_verified)?;
-
-        // verified_select.enforce_equal(&Boolean::TRUE)?;
-        
-        let i_prev_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(          // VERIFY USED TO FAIL BUT WORKS NOW
+        let schnorr_verified = SchnorrSignatureVerifyGadget::<C,GG>::verify(
             cs.clone(),
-            &{
-                let i_value = self.i.as_ref().unwrap_or(&0);
-                let selected_i_prev = UInt8::<ConstraintF<C>>::conditionally_select(
-                    &Boolean::<ConstraintF<C>>::constant(*i_value == 0),
-                    &UInt8::<ConstraintF<C>>::constant(0),
-                    &UInt8::<ConstraintF<C>>::constant(i_value.checked_sub(1).unwrap_or(0)),   // both branches run
-                )?;
-                [selected_i_prev.value()?]
-            }
+            &schnorr_param_const,
+            &schnorr_apk_wtns,
+            &reconstructed_msg_wtns,
+            &schnorr_sig_wtns,
+            &mut poseidon_params_wtns,
         ).unwrap();
+
+        let end = start.elapsed();
+        println!("Schnorr verify time {:?}", end);
+        
+        let verified_select: Boolean<ConstraintF<C>> = first_login_wtns.select(&Boolean::TRUE, &schnorr_verified)?;
+
+        verified_select.enforce_equal(&Boolean::TRUE)?;
+        
+        // let i_prev_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(          // VERIFY USED TO FAIL BUT WORKS NOW
+        //     cs.clone(),
+        //     &{
+        //         let i_value = self.i.as_ref().unwrap_or(&0);
+        //         let selected_i_prev = UInt8::<ConstraintF<C>>::conditionally_select(
+        //             &Boolean::<ConstraintF<C>>::constant(*i_value == 0),
+        //             &UInt8::<ConstraintF<C>>::constant(0),
+        //             &UInt8::<ConstraintF<C>>::constant(i_value.checked_sub(1).unwrap_or(0)),   // both branches run
+        //         )?;
+        //         [selected_i_prev.value()?]
+        //     }
+        // ).unwrap();
 
         let i_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(           // VERIFY FAILS
             cs.clone(),
             &[*self.i.as_ref().unwrap_or(&0)]
         ).unwrap();
 
-        let mut cur_input = vec![];
-        cur_input.extend_from_slice(&elgamal_key_wtns_for_h);
-        cur_input.extend_from_slice(&i_wtns);
+        // let mut cur_input = vec![];
+        // cur_input.extend_from_slice(&elgamal_key_wtns_for_h);
+        // cur_input.extend_from_slice(&i_wtns);
 
-        let mut prev_input = vec![];
-        prev_input.extend_from_slice(&elgamal_key_wtns_for_h);
-        prev_input.extend_from_slice(&i_prev_wtns);
+        // let mut prev_input = vec![];
+        // prev_input.extend_from_slice(&elgamal_key_wtns_for_h);
+        // prev_input.extend_from_slice(&i_prev_wtns);
         
-        let computed_hash_wtns: FpVar<<<C as ProjectiveCurve>::Affine as AffineCurve>::BaseField> = <CRHGadget<ConstraintF<C>, MyPoseidonParams> as CRHGadgetTrait::<CRH<ConstraintF<C>, MyPoseidonParams>, ConstraintF<C>>>::evaluate(&mut poseidon_params_wtns, &cur_input).unwrap();
+        // let computed_hash_wtns: FpVar<ConstraintF<C>> = <CRHGadget<ConstraintF<C>, MyPoseidonParams> as CRHGadgetTrait::<CRH<ConstraintF<C>, MyPoseidonParams>, ConstraintF<C>>>::evaluate(&mut poseidon_params_wtns, &cur_input).unwrap();
         
-        // let computed_prev_hash_wtns: FpVar<<<C as ProjectiveCurve>::Affine as AffineCurve>::BaseField> = <CRHGadget<ConstraintF<C>, MyPoseidonParams> as CRHGadgetTrait::<CRH<ConstraintF<C>, MyPoseidonParams>, ConstraintF<C>>>::evaluate(&mut poseidon_params_wtns, &prev_input).unwrap();
-
-        let h_cur_wtns = FpVar::<ConstraintF<C>>::new_variable(
+        let computed_hash_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
             cs.clone(),
-            || {
-                let h_cur = self.h_cur.unwrap_or(h_default);
-                Ok(ConstraintF::<C>::from_repr(h_cur.into_repr()).unwrap())
+            &{
+                let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&default_poseidon_params);
+                let mut cur_input = vec![];
+                let elgamal_key = self.elgamal_key.as_ref().unwrap_or(&affine_default);
+                let mut elgamal_key_bytes = vec![];
+                elgamal_key.serialize(&mut elgamal_key_bytes);
+                cur_input.extend_from_slice(&elgamal_key_bytes);
+                cur_input.extend_from_slice(&[*self.i.as_ref().unwrap_or(&0)]);
+                let result = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &cur_input).unwrap();
+                let mut result_vec = vec![];
+                result.write(&mut result_vec);
+                result_vec
             },
-            AllocationMode::Witness,
+            // AllocationMode::Witness,
         ).unwrap();
 
-        let h_prev_wtns = FpVar::<ConstraintF<C>>::new_variable(
+        let computed_prev_hash_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
             cs.clone(),
-            || {
-                let h_prev = self.h_prev.unwrap_or(h_default);
-                Ok(ConstraintF::<C>::from_repr(h_prev.into_repr()).unwrap())
+            &{
+                let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&default_poseidon_params);
+                let mut prev_input = vec![];
+                let elgamal_key = self.elgamal_key.as_ref().unwrap_or(&affine_default);
+                let mut elgamal_key_bytes = vec![];
+                elgamal_key.serialize(&mut elgamal_key_bytes);
+
+                let i_value = self.i.as_ref().unwrap_or(&0);
+                // let selected_i_prev = Boolean::constant(*i_value == 0).select(&vec![0], &vec![i_value.checked_sub(1).unwrap_or(0)]);
+                let selected_i_prev = UInt8::<ConstraintF<C>>::conditionally_select(
+                    &Boolean::<ConstraintF<C>>::constant(*i_value == 0),
+                    &UInt8::<ConstraintF<C>>::constant(0),
+                    &UInt8::<ConstraintF<C>>::constant(i_value.checked_sub(1).unwrap_or(0)),   // both branches run
+                )?;
+
+                prev_input.extend_from_slice(&elgamal_key_bytes);
+                prev_input.extend_from_slice(&[selected_i_prev.value().unwrap()]);
+                let result = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &prev_input).unwrap();
+                let mut result_vec = vec![];
+                result.serialize(&mut result_vec);
+                result_vec
             },
-            AllocationMode::Witness,
+            // AllocationMode::Witness,
         ).unwrap();
 
-        // computed_hash_wtns.enforce_equal(&h_cur_wtns);
-        // computed_prev_hash_wtns.enforce_equal(&h_prev_wtns);
+        let h_cur_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
+            cs.clone(),
+            &{
+                let h_cur = self.h_cur.unwrap_or(h_default);            // TODO: consider serializing outside circuit and passing u8 as input
+                let mut h_cur_vec = vec![];
+                h_cur.write(&mut h_cur_vec);
+                h_cur_vec
+            },
+            // AllocationMode::Witness,
+        ).unwrap();
+
+        let h_prev_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
+            cs.clone(),
+            &{
+                let h_prev = self.h_prev.unwrap_or(h_default);            // TODO: consider serializing outside circuit and passing u8 as input
+                let mut h_prev_vec = vec![];
+                h_prev.write(&mut h_prev_vec);
+                h_prev_vec
+            },
+            // AllocationMode::Witness,
+        ).unwrap();
+
+        computed_hash_wtns.enforce_equal(&h_cur_wtns);
+        computed_prev_hash_wtns.enforce_equal(&h_prev_wtns);
 
         Ok(())
     }
