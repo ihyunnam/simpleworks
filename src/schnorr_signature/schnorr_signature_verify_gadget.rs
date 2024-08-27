@@ -45,7 +45,7 @@ pub trait SigVerifyGadget<F: Field, S: SignatureScheme, CF: PrimeField> {
         public_key: &Self::PublicKeyVar,
         message: &[UInt8<CF>],
         signature: &Self::SignatureVar,
-        poseidon_params: PoseidonRoundParamsVar<CF, MyPoseidonParams>,
+        poseidon_params: &PoseidonRoundParamsVar<CF, MyPoseidonParams>,
     ) -> Result<Boolean<CF>, SynthesisError>;
 }
 
@@ -76,7 +76,7 @@ where
         public_key: &Self::PublicKeyVar,
         message: &[UInt8<ConstraintF<C>>],
         signature: &Self::SignatureVar,
-        poseidon_params: PoseidonRoundParamsVar<ConstraintF<C>, MyPoseidonParams>,
+        poseidon_params: &PoseidonRoundParamsVar<ConstraintF<C>, MyPoseidonParams>,
     ) -> Result<Boolean<ConstraintF<C>>, SynthesisError> {
         let start = Instant::now();
         let prover_response = signature.prover_response.clone();
@@ -109,9 +109,9 @@ where
         //     hash3_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
         // }
 
-        let hash1 = CRHGadget::<ConstraintF<C>, MyPoseidonParams>::evaluate(&poseidon_params, &verifier_challenge).unwrap();
-        let hash2 = CRHGadget::<ConstraintF<C>, MyPoseidonParams>::evaluate(&poseidon_params, &hash2_var).unwrap();
-        let hash3 = CRHGadget::<ConstraintF<C>, MyPoseidonParams>::evaluate(&poseidon_params, &message).unwrap();
+        let hash1 = CRHGadget::<ConstraintF<C>, MyPoseidonParams>::evaluate(poseidon_params, &verifier_challenge).unwrap();
+        let hash2 = CRHGadget::<ConstraintF<C>, MyPoseidonParams>::evaluate(poseidon_params, &hash2_var).unwrap();
+        let hash3 = CRHGadget::<ConstraintF<C>, MyPoseidonParams>::evaluate(poseidon_params, &message).unwrap();
 
         let mut vector1 = vec![];
         let mut vector2 = vec![];
