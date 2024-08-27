@@ -1,3 +1,4 @@
+use ark_crypto_primitives::CRH as CRHTrait;
 use ark_std::UniformRand;
 use ark_bls12_381::FrParameters;
 use ark_crypto_primitives::signature::SignatureScheme;
@@ -7,7 +8,7 @@ use ark_r1cs_std::{alloc::AllocationMode, R1CSVar};
 use ark_crypto_primitives::crh::CRHGadget as CRHGadgetTrait;
 use ark_crypto_primitives::crh::poseidon::sbox::PoseidonSbox;
 use ark_crypto_primitives::crh::poseidon::PoseidonRoundParams;
-use ark_crypto_primitives::crh::poseidon::{Poseidon, constraints::{PoseidonRoundParamsVar, CRHGadget}};
+use ark_crypto_primitives::crh::poseidon::{CRH, Poseidon, constraints::{PoseidonRoundParamsVar, CRHGadget}};
 use ark_crypto_primitives::signature::schnorr::PublicKey;
 
 use super::schnorr::MyPoseidonParams;
@@ -80,9 +81,9 @@ where
     ) -> Result<Boolean<ConstraintF<C>>, SynthesisError> {
         let start = Instant::now();
         let prover_response = signature.prover_response.clone();
-        let verifier_challenge = signature.verifier_challenge.clone();
+        let verifier_challenge = signature.verifier_challenge.value().unwrap_or(vec![0u8;32]).clone();
 
-        // let poseidon_params = poseidon_params.params;
+        let poseidon_params = poseidon_params.params.clone();
         // let poseidon_params = PoseidonRoundParamsVar::<ConstraintF<C>, MyPoseidonParams>::new_variable(
         //     cs.clone(),
         //     || Ok(poseidon_params.params),
@@ -99,19 +100,21 @@ where
         let mut agg_pubkey_serialized = vec![];
         pubkey_affine.serialize(&mut agg_pubkey_serialized);
 
-        let mut hash2_var = vec![];
-        for coord in agg_pubkey_serialized {
-            hash2_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
-        }
+        // let mut hash2_var = vec![];
+        // for coord in agg_pubkey_serialized {
+        //     hash2_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
+        // }
+
+        let message = message.value().unwrap_or(vec![0u8;96]);
         // let mut hash3_var = vec![];
         // for coord in message.value().unwrap_or(vec![0u8;96]) {
         //     // println!("coord msg {:?}", coord);
         //     hash3_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
         // }
 
-        let hash1 = CRHGadget::<ConstraintF<C>, MyPoseidonParams>::evaluate(poseidon_params, &verifier_challenge).unwrap();
-        let hash2 = CRHGadget::<ConstraintF<C>, MyPoseidonParams>::evaluate(poseidon_params, &hash2_var).unwrap();
-        let hash3 = CRHGadget::<ConstraintF<C>, MyPoseidonParams>::evaluate(poseidon_params, &message).unwrap();
+        let hash1 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &verifier_challenge).unwrap();
+        let hash2 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &agg_pubkey_serialized).unwrap();
+        let hash3 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &message).unwrap();
 
         let mut vector1 = vec![];
         let mut vector2 = vec![];
@@ -122,26 +125,31 @@ where
         // Deserialize the bytes back into an affine point
         let prover_response_fe = C::ScalarField::deserialize(&mut reader).unwrap();
 
-        let hash1 = hash1.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
-        let hash2 = hash2.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
-        let hash3 = hash3.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
+        // let hash1 = hash1.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
+        // let hash2 = hash2.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
+        // let hash3 = hash3.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
 
         hash1.serialize(&mut vector1).unwrap();
         hash2.serialize(&mut vector2).unwrap();
         hash3.serialize(&mut vector3).unwrap();
 
-        // UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), vector1.as_slice());
-        // UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), vector2.as_slice());
-        // UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), vector3.as_slice());
+        UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), vector1.as_slice());
+        UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), vector2.as_slice());
+        UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), vector3.as_slice());
 
         let mut final_vector = Vec::with_capacity(vector1.len() + vector2.len() + vector3.len());
         final_vector.extend(vector1.clone());
         final_vector.extend(vector2.clone());
         final_vector.extend(vector3.clone());
 
-        // let final_vector_1 = UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), final_vector.as_slice());
+        // hash1.into_repr()
+        
 
-        let e = C::ScalarField::from_be_bytes_mod_order(final_vector.as_slice());          // to_bytes in LE
+        let e = C::ScalarField::from_be_bytes_mod_order(vector1.as_slice()); 
+
+        let vector1 = UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), vector1.as_slice()).unwrap();
+        // let e = C::ScalarField::from_repr(hash1.into_repr());
+        // (vector1.value().unwrap_or(vec![0]).as_slice());          // to_bytes in LE
         
         // let verification_point = parameters.generator.mul(prover_response).sub(pubkey_affine.mul(e));
 
@@ -156,11 +164,9 @@ where
             verification_point_wtns.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
         }
         
-        Ok(verification_point_wtns.is_eq(&verifier_challenge)?)
+        Ok(verification_point_wtns.is_eq(&signature.verifier_challenge.clone())?)
     }
 }
-
-
 
 // let prover_response = signature.prover_response.clone();
 // let verifier_challenge = signature.verifier_challenge.clone();

@@ -251,6 +251,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             &mut poseidon_params_wtns,
         ).unwrap();
 
+        println!("verified {:?}", schnorr_verified.value());
         let end = start.elapsed();
         println!("Schnorr verify time {:?}", end);
         

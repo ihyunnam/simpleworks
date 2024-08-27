@@ -183,6 +183,7 @@ where
         pk: &Self::PublicKey,
         message: &[u8],
         signature: &Self::Signature,
+        
     ) -> Result<bool, Error> {
         let Signature {
             prover_response,    // s
@@ -1289,16 +1290,16 @@ where
     hash2.serialize(&mut vector2).unwrap();
     hash3.serialize(&mut vector3).unwrap();
 
-    // Concatenate the vectors
-    let mut final_vector = Vec::with_capacity(vector1.len() + vector2.len() + vector3.len());
-    final_vector.extend(vector1);
-    final_vector.extend(vector2);
-    final_vector.extend(vector3);
+    // // Concatenate the vectors
+    // let mut final_vector = Vec::with_capacity(vector1.len() + vector2.len() + vector3.len());
+    // final_vector.extend(vector1);
+    // final_vector.extend(vector2);
+    // final_vector.extend(vector3);
 
     // println!("VECTOR LENGTH {:?}", final_vector.len());
 
     // println!("FINAL VECTOR INSIDE TWEAK {:?}", final_vector);
-    S::from(MaybeScalar::from_be_bytes_mod_order(&final_vector))
+    S::from(MaybeScalar::from_be_bytes_mod_order(&vector1))
 }
 
 
