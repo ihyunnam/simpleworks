@@ -1245,61 +1245,24 @@ where
     {
     let mut agg_pubkey_serialized = vec![];
     aggregated_pubkey.serialize(&mut agg_pubkey_serialized);
-    // let mut bytes = [0u8; 32];
-    // aggregated_pubkey.serialize(&mut bytes[..]);
-    // let agg_pubkey_copy = agg_pubkey_serialized.clone();
-    // let hash: [u8; 32] = BIP0340_CHALLENGE_TAG_HASHER
-    //     .clone()
-    //     .chain_update(final_nonce_xonly)
-    //     .chain_update(&agg_pubkey_serialized)
-    //     .chain_update(message.as_ref())
-    //     .finalize()
-    //     .into();
-
-    // let hash_input = final_nonce_xonly;
-    // let mut hash_input: Vec<u8> = Vec::new();
-    // hash_input.extend_from_slice(final_nonce_xonly);
-    // hash_input.extend_from_slice(&bytes);
-    // hash_input.extend_from_slice(message.as_ref());
-    
-    // println!("HASH INPUT INSIDE TWEAK() {:?}", hash_input.len());       // length is 160
-    // let poseidon_params = Poseidon::<ConstraintF<C>, PoseidonRoundParams<F>> {
-    //     params: MyPoseidonParams::default(),
-    //     round_keys: vec![],
-    //     mds_matrix: vec![],     // TODO: generate mds matrix
-    // };
-
-    // println!("HASH INPUT INSIDE TWEAK() {:?}", final_nonce_xonly);
-    // println!("HASH INPUT INSIDE TWEAK() {:?}", agg_pubkey_serialized);
-    // println!("HASH INPUT INSIDE TWEAK() {:?}", message.as_ref());
-
     let mut vector1 = vec![];
     let mut vector2 = vec![];
     let mut vector3 = vec![];
 
-    // println!("PARAMS INSIDE TWEAK {:?}", poseidon_params);
-
     let hash1 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, final_nonce_xonly).unwrap();
-    // println!("HASH1 INSIDE TWEAK {:?}", hash1);
     let hash2 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, &agg_pubkey_serialized).unwrap();
-    // println!("HASH2 INSIDE TWEAK {:?}", hash2);
     let hash3 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, message.as_ref()).unwrap();
-    // println!("HASH3 INSIDE TWEAK {:?}", hash3);
-    // Serialize each hash into its own vector
     hash1.serialize(&mut vector1).unwrap();
     hash2.serialize(&mut vector2).unwrap();
     hash3.serialize(&mut vector3).unwrap();
 
-    // // Concatenate the vectors
-    // let mut final_vector = Vec::with_capacity(vector1.len() + vector2.len() + vector3.len());
-    // final_vector.extend(vector1);
-    // final_vector.extend(vector2);
-    // final_vector.extend(vector3);
+    // Concatenate the vectors
+    let mut final_vector = Vec::with_capacity(vector1.len() + vector2.len() + vector3.len());
+    final_vector.extend(vector1);
+    final_vector.extend(vector2);
+    final_vector.extend(vector3);
 
-    // println!("VECTOR LENGTH {:?}", final_vector.len());
-
-    // println!("FINAL VECTOR INSIDE TWEAK {:?}", final_vector);
-    S::from(MaybeScalar::from_be_bytes_mod_order(&vector1))
+    S::from(MaybeScalar::from_be_bytes_mod_order(&final_vector))
 }
 
 

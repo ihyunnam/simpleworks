@@ -84,34 +84,13 @@ where
         let verifier_challenge = signature.verifier_challenge.value().unwrap_or(vec![0u8;32]).clone();
 
         let poseidon_params = poseidon_params.params.clone();
-        // let poseidon_params = PoseidonRoundParamsVar::<ConstraintF<C>, MyPoseidonParams>::new_variable(
-        //     cs.clone(),
-        //     || Ok(poseidon_params.params),
-        //     AllocationMode::Witness,
-        // )?;
-
-        // let mut hash1_var = vec![];
-        // for coord in verifier_challenge.value().unwrap_or(vec![0u8;32]) {
-        //     // println!("coord vc {:?}", coord);
-        //     hash1_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
-        // }
 
         let pubkey_affine = public_key.pub_key.value().unwrap_or(C::default()).into_affine();
         let mut agg_pubkey_serialized = vec![];
         pubkey_affine.serialize(&mut agg_pubkey_serialized);
 
-        // let mut hash2_var = vec![];
-        // for coord in agg_pubkey_serialized {
-        //     hash2_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
-        // }
-
         let message = message.value().unwrap_or(vec![0u8;96]);
-        // let mut hash3_var = vec![];
-        // for coord in message.value().unwrap_or(vec![0u8;96]) {
-        //     // println!("coord msg {:?}", coord);
-        //     hash3_var.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
-        // }
-
+        
         let hash1 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &verifier_challenge).unwrap();
         let hash2 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &agg_pubkey_serialized).unwrap();
         let hash3 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &message).unwrap();
@@ -125,39 +104,21 @@ where
         // Deserialize the bytes back into an affine point
         let prover_response_fe = C::ScalarField::deserialize(&mut reader).unwrap();
 
-        // let hash1 = hash1.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
-        // let hash2 = hash2.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
-        // let hash3 = hash3.value().unwrap_or(<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField::default());
-
         hash1.serialize(&mut vector1).unwrap();
         hash2.serialize(&mut vector2).unwrap();
         hash3.serialize(&mut vector3).unwrap();
 
-        UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), vector1.as_slice());
-        UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), vector2.as_slice());
-        UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), vector3.as_slice());
-
         let mut final_vector = Vec::with_capacity(vector1.len() + vector2.len() + vector3.len());
         final_vector.extend(vector1.clone());
         final_vector.extend(vector2.clone());
-        final_vector.extend(vector3.clone());
+        final_vector.extend(vector3.clone());        
 
-        // hash1.into_repr()
-        
-
-        let e = C::ScalarField::from_be_bytes_mod_order(vector1.as_slice()); 
-
-        let vector1 = UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), vector1.as_slice()).unwrap();
-        // let e = C::ScalarField::from_repr(hash1.into_repr());
-        // (vector1.value().unwrap_or(vec![0]).as_slice());          // to_bytes in LE
-        
-        // let verification_point = parameters.generator.mul(prover_response).sub(pubkey_affine.mul(e));
+        let e = C::ScalarField::from_be_bytes_mod_order(final_vector.as_slice()); 
 
         let verification_point = parameters.generator.value().unwrap_or(C::default()).into_affine().mul(prover_response_fe).sub(public_key.pub_key.value().unwrap_or(C::default()).into_affine().mul(e)).into_affine();
         let mut verification_point_bytes: Vec<u8> = vec![];
         verification_point.serialize(&mut verification_point_bytes);            // TODO: consider using write() instead of serialize()
-        // let end = start.elapsed();
-        // println!("verify 4 {:?}", end);
+
         
         let mut verification_point_wtns: Vec<UInt8<ConstraintF<C>>> = vec![];
         for coord in verification_point_bytes {
