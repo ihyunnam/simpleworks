@@ -96,7 +96,7 @@ where
         // }
 
         let pubkey_affine = public_key.pub_key.value().unwrap_or(C::default()).into_affine();
-        let mut agg_pubkey_serialized = [0u8; 32];
+        let mut agg_pubkey_serialized = vec![];
         pubkey_affine.serialize(&mut agg_pubkey_serialized[..]);
 
         let mut hash2_var = vec![];
@@ -141,14 +141,13 @@ where
 
         // let final_vector_1 = UInt8::<ConstraintF<C>>::new_witness_vec(cs.clone(), final_vector.as_slice());
 
-
         let e = C::ScalarField::from_be_bytes_mod_order(final_vector.as_slice());          // to_bytes in LE
         
         // let verification_point = parameters.generator.mul(prover_response).sub(pubkey_affine.mul(e));
 
         let verification_point = parameters.generator.value().unwrap_or(C::default()).into_affine().mul(prover_response_fe).sub(public_key.pub_key.value().unwrap_or(C::default()).into_affine().mul(e)).into_affine();
         let mut verification_point_bytes: Vec<u8> = vec![];
-        verification_point.serialize(&mut verification_point_bytes);
+        verification_point.serialize(&mut verification_point_bytes);            // TODO: consider using write() instead of serialize()
         // let end = start.elapsed();
         // println!("verify 4 {:?}", end);
         

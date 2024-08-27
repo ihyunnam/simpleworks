@@ -1,10 +1,13 @@
 // use ark_crypto_primitives_04::sponge::poseidon::*;
-use ark_crypto_primitives::crh::CRHGadget as CRHGadgetTrait;
+use ark_crypto_primitives::crh::{CRH as CRHTrait, CRHGadget as CRHGadgetTrait};
 use ark_crypto_primitives::crh::poseidon::sbox::PoseidonSbox;
 use ark_crypto_primitives::crh::poseidon::PoseidonRoundParams;
-use ark_crypto_primitives::crh::poseidon::{Poseidon, constraints::{PoseidonRoundParamsVar, CRHGadget, find_poseidon_ark_and_mds}};
+use ark_crypto_primitives::crh::poseidon::{CRH , Poseidon, constraints::{PoseidonRoundParamsVar, CRHGadget, find_poseidon_ark_and_mds}};
+// use ark_crypto_primitives::CRH;
+use ark_r1cs_std::fields::fp::FpVar;
 use simpleworks::schnorr_signature::schnorr_signature_verify_gadget::SigVerifyGadget;
 use simpleworks::schnorr_signature::SimpleSchnorrSignatureVar;
+use std::borrow::Borrow;
 use std::convert::TryInto;
 
 // THIS IS WITHOUT AGGREGATE SCHNORR AND PUBLIC INPUTS
@@ -16,7 +19,7 @@ use bitvec::view::AsBits;
 // use ark_crypto_primitives::crh::pedersen::Window;
 use commit::{CommGadget, RandomnessVar as PedersenRandomnessVar, ParametersVar as PedersenParametersVar};
 use ark_ec::bls12::Bls12Parameters;
-use ark_crypto_primitives::crh::CRH;
+// use ark_crypto_primitives::crh::{CRH};
 use simpleworks::schnorr_signature::schnorr::MyPoseidonParams;
 // use simpleworks::schnorr_signature::blake2s::{ROGadget, RandomOracleGadget};
 // use simpleworks::schnorr_signature::schnorr_signature_verify_gadget::SigVerifyGadget;
@@ -43,7 +46,8 @@ use ark_bls12_381::{Bls12_381 as E, Fr};
 use ark_r1cs_std::{
     alloc::AllocVar,
     eq::EqGadget,
-    prelude::*
+    prelude::*,
+    ToConstraintFieldGadget,
 };
 // use digest::typenum::Zero;
 use tracing_subscriber::layer::SubscriberExt;
@@ -62,7 +66,6 @@ use simpleworks::schnorr_signature::
     signature_var::SignatureVar,
 };
 
-// TODO: change blake2s in simpleworks (schnorr) to poseidon for performance
 use ark_crypto_primitives::{
     commitment::{pedersen::{
      Commitment, Randomness as PedersenRandomness, Parameters as PedersenParameters},
@@ -94,16 +97,16 @@ pub struct InsertCircuit<W, C: ProjectiveCurve, GG: CurveVar<C, ConstraintF<C>>>
     first_login: Option<bool>,
     schnorr_params: Option<Parameters<C>>,
     schnorr_apk: Option<C::Affine>,
-    apk_commit_x: Option<ark_ff::Fp256<ark_bls12_381::FrParameters>>,
-    apk_commit_y: Option<ark_ff::Fp256<ark_bls12_381::FrParameters>>,
-    pedersen_rand: Option<PedersenRandomness<C>>,
-    pedersen_params: Option<PedersenParameters<C>>,
+    // apk_commit_x: Option<ark_ff::Fp256<ark_bls12_381::FrParameters>>,
+    // apk_commit_y: Option<ark_ff::Fp256<ark_bls12_381::FrParameters>>,
+    // pedersen_rand: Option<PedersenRandomness<C>>,
+    // pedersen_params: Option<PedersenParameters<C>>,
     poseidon_params: Option<Poseidon::<ConstraintF<C>, MyPoseidonParams>>,
     schnorr_sig: Option<Signature<C>>,
-    h_prev: Option<[u8;32]>,           /* Record info */
+    h_prev: Option<ConstraintF<C>>,           /* Record info */
     v_prev: Option<Ciphertext<C>>,
-    prf_key: Option<[u8;32]>,  
-    h_cur: Option<[u8;32]>,
+    elgamal_key: Option<EncPubKey<C>>,  
+    h_cur: Option<ConstraintF<C>>,
     i: Option<u8>,
     _curve_var: PhantomData<GG>,
     _window_var: PhantomData<W>,
@@ -117,34 +120,53 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
     for<'a> &'a GG: ark_r1cs_std::groups::GroupOpsBounds<'a, C, GG>,
     <C as ProjectiveCurve>::Affine: From<ark_ec::twisted_edwards_extended::GroupAffine<EdwardsParameters>>,
     Namespace<<<C as ProjectiveCurve>::BaseField as Field>::BasePrimeField>: From<ConstraintSystemRef<Fr>>,
-    
+    <C as ProjectiveCurve>::BaseField: PrimeField,
+    // Vec<u8>: Borrow<<C as ProjectiveCurve>::BaseField>,
 {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
         let start = Instant::now();
-        let prf_key_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
-            cs.clone(),
-            self.prf_key.as_ref().unwrap_or(&[0u8;32])
-        ).unwrap();
 
-        // let h_cur: Vec<UInt8::<ConstraintF<C>>> = self.h_cur.as_ref().unwrap_or(&[0u8;32]).to_vec();
-        // let h_cur_wtns = PrfOutputVar(h_cur);
-        let h_cur_wtns = PrfOutputVar::<ConstraintF<C>>::new_variable(  // Vec<Uint8<ConstraintF<C>>>
+        let affine_default = C::Affine::default();
+        let h_default = ConstraintF::<C>::default();
+
+        /* Different formats but this shows that h_i is hash containing v_i encryption key. */
+        let elgamal_key_wtns = ElgamalPublicKeyVar::<C,GG>::new_variable(
             cs.clone(),
-            || Ok(self.h_cur.as_ref().unwrap_or(&[0u8;32])),
+            || Ok(self.elgamal_key.as_ref().unwrap_or(&affine_default)),
             AllocationMode::Witness,
         ).unwrap();
+
+        let elgamal_key_wtns_for_h = UInt8::<ConstraintF<C>>::new_witness_vec(
+            cs.clone(),
+            &{
+                let mut elgamal_bytes = vec![];
+                let elgamal_key = self.elgamal_key.as_ref().unwrap_or(&affine_default);
+                elgamal_key.serialize(&mut elgamal_bytes);
+                // println!("LENGTH {:?}", elgamal_bytes.len());
+                elgamal_bytes
+            }
+        ).unwrap();
+
+        // let mut h_cur_bytes = vec![];
+        // let h_cur_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
+        //     cs.clone(),
+        //     &{
+        //         let h_prev = self.h_cur.as_ref().unwrap_or(&ConstraintF::<C>::default());
+        //         h_prev.write(h_cur_bytes);
+        //         h_cur_bytes
+        //     }
+        // ).unwrap().into()?;
 
         let first_login_wtns = Boolean::<ConstraintF<C>>::new_witness(cs.clone(), || {
             Ok(self.first_login.as_ref().unwrap_or(&false))
         }).unwrap();
 
-        // println!("FIRST LOGIN WTNS {:?}", first_login_wtns.value());
-
         let reconstructed_msg_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
             cs.clone(),
             &{
-                let h = self.h_prev.as_ref().unwrap_or(&[0u8;32]);
-
+                let mut h_bytes = vec![];
+                let h = self.h_prev.as_ref().unwrap_or(&h_default);
+                h.write(&mut h_bytes);
                 let default_coords = (<C as ProjectiveCurve>::Affine::default(), <C as ProjectiveCurve>::Affine::default());
                 let mut v_0_bytes = vec![];
                 let mut v_1_bytes = vec![];
@@ -154,16 +176,13 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                 v.1.serialize(&mut v_1_bytes).unwrap();
 
                 let mut msg: Vec<u8> = vec![];
-                msg.extend_from_slice(h);
+                msg.extend_from_slice(&h_bytes);
                 msg.extend_from_slice(&v_0_bytes);        // TODO: check partitions too
                 msg.extend_from_slice(&v_1_bytes);
 
                 msg
             }
         ).unwrap();
-        let end = start.elapsed();
-        println!("time 1 {:?}", end);
-
         let start = Instant::now();
         let default_schnorr_param: Parameters<C> = Parameters::<C> {
             generator: <C as ProjectiveCurve>::Affine::default(),
@@ -190,9 +209,6 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
         ).unwrap();
 
         let default_pubkey = PublicKey::<C>::default();
-        
-        let end = start.elapsed();
-        println!("time before verify {:?}", end);
 
         /* SCHNORR SIG VERIFY GADGET */
         let default_poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
@@ -201,7 +217,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             mds_matrix: vec![vec![<ConstraintF<C>>::zero();6];6],
         };
         
-        let poseidon_params_wtns = PoseidonRoundParamsVar::<ConstraintF<C>, MyPoseidonParams>::new_variable(
+        let mut poseidon_params_wtns = PoseidonRoundParamsVar::<ConstraintF<C>, MyPoseidonParams>::new_variable(
             cs.clone(),
             || Ok(self.poseidon_params.as_ref().unwrap_or(&default_poseidon_params)),
             AllocationMode::Witness,
@@ -210,7 +226,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
         let schnorr_apk_wtns = PublicKeyVar::<C, GG>::new_variable(
             cs.clone(),
             || Ok(self.schnorr_apk.as_ref().unwrap_or(&default_pubkey)),
-            AllocationMode::Witness,
+            AllocationMode::Input,          // NOTE: this should be witness when RP is verifying circuit
         ).unwrap();
 
         let schnorr_sig_wtns = SignatureVar::<C, GG>::new_variable(
@@ -223,123 +239,25 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
         let apk = self.schnorr_apk.as_ref().unwrap_or(&default_pubkey);
         apk.serialize(&mut h_vec[..]).unwrap();
 
-        let schnorr_verified = SchnorrSignatureVerifyGadget::<C,GG>::verify(
-            cs.clone(),
-            &schnorr_param_const,
-            &schnorr_apk_wtns,
-            &reconstructed_msg_wtns,
-            &schnorr_sig_wtns,
-            poseidon_params_wtns,
-        ).unwrap();
-
         let end = start.elapsed();
-        println!("time schnorr verify {:?}", end);
-
+        println!("Various variable declaration {:?}", end);
         let start = Instant::now();
-        println!("SCHNORR VERIFY AT NONE {:?}", schnorr_verified.value());      // Err(AssignmentMissing if ingredients are [0] and stuff)
-        let verified_select: Boolean<ConstraintF<C>> = first_login_wtns.select(&Boolean::TRUE, &schnorr_verified)?;
-        // TODO: move enforce equal into verify() and have only one?
-
-        // println!("VERIFIED SELECT (should be true) {:?}", verified_select.value());
-        verified_select.enforce_equal(&Boolean::TRUE)?;
-        
-        /* Check that the schnorr_apk provided is the apk committed to at registration and given to RP. */
-
-        let apk_commit_x: Fp256<ark_bls12_381::FrParameters> = self.apk_commit_x.ok_or(SynthesisError::AssignmentMissing)?;
-        let apk_commit_y: Fp256<ark_bls12_381::FrParameters> = self.apk_commit_y.ok_or(SynthesisError::AssignmentMissing)?;
-        
-        let apk_commit_proj = C::from(GroupAffine::<ark_ed_on_bls12_381::EdwardsParameters>::new(apk_commit_x, apk_commit_y).into());       // THIS IS TWISTED EDWARDS
-        println!("APK COMMIT PROJ {:?}", apk_commit_proj);
-        let reconstructed_commit_var = GG::new_variable_omit_prime_order_check( // VERIFY USED TO FAIL BUT PASSES NOW
-            cs.clone(),
-            || Ok(apk_commit_proj),
-            AllocationMode::Input,
-        ).unwrap();
-
-        println!("reconstructed_commit_var {:?}", reconstructed_commit_var.value());
-
-        let end = start.elapsed();
-        println!("time 3 {:?}", end);
-
-        let start = Instant::now();
-        let commit_wtns = GG::new_variable_omit_prime_order_check( // VERIFY USED TO FAIL BUT PASSES NOW
-            cs.clone(),
-            || {
-                let default_rand = PedersenRandomness::default();
-                let default_param = PedersenParameters::<C> {
-                    randomness_generator: vec![],
-                    generators: vec![vec![];16],        // NUM_WINDOWS=16 hardcoded
-                };
-                let parameters = self.pedersen_params.as_ref().unwrap_or(&default_param);
-                let randomness = self.pedersen_rand.as_ref().unwrap_or(&default_rand);
-
-                let mut h_vec = vec![0u8; 32];  // Vec<u8> avoids lifetime issues
-                let apk = self.schnorr_apk.as_ref().unwrap_or(&default_pubkey);
-                apk.serialize(&mut h_vec[..]).unwrap();
-                // let schnorr_apk_var = UInt8::<ConstraintF<C>>::new_witness_vec (
-                //     cs.clone(),
-                //     &{   
-                //         let apk = self.schnorr_apk.as_ref().unwrap_or(&default_pubkey);
-                //         apk.serialize(&mut h_vec[..]).unwrap();
-
-                //         h_vec
-                //     }
-                // ).unwrap();
-                let input = h_vec;
-                
-                // If the input is too long, return an error.
-                if input.len() > W::WINDOW_SIZE * W::NUM_WINDOWS {
-                    panic!("incorrect input length: {:?}", input.len());
-                }
-                // Pad the input to the necessary length.
-                let mut padded_input = Vec::with_capacity(input.len());
-                let mut input = input;
-                if (input.len() * 8) < W::WINDOW_SIZE * W::NUM_WINDOWS {
-                    padded_input.extend_from_slice(&input);
-                    let padded_length = (W::WINDOW_SIZE * W::NUM_WINDOWS) / 8;
-                    padded_input.resize(padded_length, 0u8);
-                    input = padded_input;
-                }
-                assert_eq!(parameters.generators.len(), W::NUM_WINDOWS);
-
-                // Invoke Pedersen CRH here, to prevent code duplication.
-
-                let crh_parameters = ark_crypto_primitives::crh::pedersen::Parameters {
-                    // randomness_generator: parameters.randomness_generator.clone(),
-                    generators: parameters.generators.clone(),
-                };
-                let mut result: C = ark_crypto_primitives::crh::pedersen::CRH::<C,W>::evaluate(&crh_parameters, &input).unwrap().into();
-
-                // Compute h^r.
-                for (bit, power) in BitIteratorLE::new(randomness.0.into_repr())
-                    .into_iter()
-                    .zip(&parameters.randomness_generator)
-                {
-                    if bit {
-                        result += power
-                    }
-                }
-                Ok(result)
-            },
-            AllocationMode::Witness,
-        ).unwrap();
-        let end = start.elapsed();
-        println!("time commit {:?}", end);
-
-        // let computed_commit = CommGadget::<C,GG,Window>::commit(&pedersen_params, &schnorr_apk_var, &pedersen_randomness).unwrap();        // POINT AT INFINITY AT DEFAULT
-
-        let computed_commit = first_login_wtns.select(&reconstructed_commit_var, &commit_wtns).unwrap();
-        
-        computed_commit.enforce_equal(&reconstructed_commit_var);
+        // let schnorr_verified = SchnorrSignatureVerifyGadget::<C,GG>::verify(
+        //     cs.clone(),
+        //     &schnorr_param_const,
+        //     &schnorr_apk_wtns,
+        //     &reconstructed_msg_wtns,
+        //     &schnorr_sig_wtns,
+        //     &mut poseidon_params_wtns,
+        // ).unwrap();
 
         // let end = start.elapsed();
-        // println!("time 4 {:?}", end);
+        // println!("Schnorr verify time {:?}", end);
+        
+        // let verified_select: Boolean<ConstraintF<C>> = first_login_wtns.select(&Boolean::TRUE, &schnorr_verified)?;
 
-        // let start = Instant::now();
-        // let computed_commit_bytes = computed_commit.to_bytes().unwrap();
-
-        // println!("COMPUTED COMMIT BYTES {:?}", computed_commit_bytes);
-
+        // verified_select.enforce_equal(&Boolean::TRUE)?;
+        
         let i_prev_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(          // VERIFY USED TO FAIL BUT WORKS NOW
             cs.clone(),
             &{
@@ -349,57 +267,48 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                     &UInt8::<ConstraintF<C>>::constant(0),
                     &UInt8::<ConstraintF<C>>::constant(i_value.checked_sub(1).unwrap_or(0)),   // both branches run
                 )?;
-                let mut i_prev_bytes = [0u8; 32];
-                i_prev_bytes[0] = selected_i_prev.value()?;
-                i_prev_bytes
+                [selected_i_prev.value()?]
             }
         ).unwrap();
-
-        // println!("i PREV WTNS (expecting 0) {:?}", i_prev_wtns.value());
 
         let i_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(           // VERIFY FAILS
             cs.clone(),
-            &{
-                let mut i_prev_bytes = [0u8; 32];
-                i_prev_bytes[0] = *self.i.as_ref().unwrap_or(&0);
-                i_prev_bytes
-            }
+            &[*self.i.as_ref().unwrap_or(&0)]
         ).unwrap();
 
-        // println!("i wtns (expecting 0) {:?}", i_wtns.value());
-        let start = Instant::now();
-        let computed_prf_wtns = Blake2sGadget::evaluate(&prf_key_wtns, &i_wtns).unwrap();
+        let mut cur_input = vec![];
+        cur_input.extend_from_slice(&elgamal_key_wtns_for_h);
+        cur_input.extend_from_slice(&i_wtns);
 
-        let computed_prev_prf_wtns = Blake2sGadget::evaluate(&prf_key_wtns, &i_prev_wtns).unwrap();
-        let end = start.elapsed();
-        println!("time 5 {:?}", end);
-        let h_prev_wtns = PrfOutputVar::<ConstraintF<C>>::new_variable(          // VERIFY FAILS
+        let mut prev_input = vec![];
+        prev_input.extend_from_slice(&elgamal_key_wtns_for_h);
+        prev_input.extend_from_slice(&i_prev_wtns);
+        
+        let computed_hash_wtns: FpVar<<<C as ProjectiveCurve>::Affine as AffineCurve>::BaseField> = <CRHGadget<ConstraintF<C>, MyPoseidonParams> as CRHGadgetTrait::<CRH<ConstraintF<C>, MyPoseidonParams>, ConstraintF<C>>>::evaluate(&mut poseidon_params_wtns, &cur_input).unwrap();
+        
+        // let computed_prev_hash_wtns: FpVar<<<C as ProjectiveCurve>::Affine as AffineCurve>::BaseField> = <CRHGadget<ConstraintF<C>, MyPoseidonParams> as CRHGadgetTrait::<CRH<ConstraintF<C>, MyPoseidonParams>, ConstraintF<C>>>::evaluate(&mut poseidon_params_wtns, &prev_input).unwrap();
+
+        let h_cur_wtns = FpVar::<ConstraintF<C>>::new_variable(
             cs.clone(),
             || {
-                let prf_key = self.prf_key.as_ref().unwrap_or(&[0u8;32]);
-                 // if first login, 'compute' with i=0. Otherwise just declare given h_prev as new_variable::witness
-                let zero_prf = Blake2s::evaluate(&prf_key, &[0u8;32]).unwrap().clone();
-                let h_prev = self.h_prev.as_ref().unwrap_or(&zero_prf);
-                println!("h prev computed {:?}", h_prev);
-                // TODO: need minor change - when first_login=true and h_cur≠0, still passes??
-                Ok(*h_prev)
+                let h_cur = self.h_cur.unwrap_or(h_default);
+                Ok(ConstraintF::<C>::from_repr(h_cur.into_repr()).unwrap())
             },
             AllocationMode::Witness,
         ).unwrap();
 
-        // println!("h cur wtns {:?}", h_cur_wtns.value());
-        // println!("computed_prf_wtns {:?}", computed_prf_wtns.value());
-        h_cur_wtns.enforce_equal(&computed_prf_wtns);
+        let h_prev_wtns = FpVar::<ConstraintF<C>>::new_variable(
+            cs.clone(),
+            || {
+                let h_prev = self.h_prev.unwrap_or(h_default);
+                Ok(ConstraintF::<C>::from_repr(h_prev.into_repr()).unwrap())
+            },
+            AllocationMode::Witness,
+        ).unwrap();
 
-        // // for first time users, this checks that i=0
-        // // h_prev_wtns is computed with i=0 and computed_prev_prf_wtns is computed with provided i
-        // println!("computed_prev_prf_wtns {:?}", computed_prev_prf_wtns.value());
-        // println!("h prev computed wtns {:?}", h_prev_wtns.value());
+        // computed_hash_wtns.enforce_equal(&h_cur_wtns);
+        // computed_prev_hash_wtns.enforce_equal(&h_prev_wtns);
 
-        computed_prev_prf_wtns.enforce_equal(&h_prev_wtns);
-        // let end = start.elapsed();
-        // println!("time 5 {:?}", end);
-        println!("last in generate constraints");
         Ok(())
     }
 }
@@ -411,24 +320,46 @@ fn main() {
     println!("Entering main.");
     let rng = &mut OsRng;
         
+    let start = Instant::now();
     let elgamal_rand = EncRand::<JubJub>::rand(rng);
     let elgamal_param = MyEnc::setup(rng).unwrap();
-    let (pubkey, _) = MyEnc::keygen(&elgamal_param, rng).unwrap();
+    let (elgamal_key, _) = MyEnc::keygen(&elgamal_param, rng).unwrap();
 
-    // Make PRF key
-    let mut prf_key = [0u8; 32];
-    rng.fill_bytes(&mut prf_key);
+    /* Generate Poseidon hash parameters for both Schnorr signature (Musig2) and v_i */      // 6, 5, 8, 57, 0
+    
+    let (ark, mds) = find_poseidon_ark_and_mds::<ConstraintF<C>> (255, 6, 8, 57, 0);        // ark_bls12_381::FrParameters::MODULUS_BITS = 255
+    let poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
+        params: MyPoseidonParams::default(),
+        round_keys: ark.into_iter().flatten().collect(),
+        mds_matrix: mds,
+    };
 
     /* Assume this is previous record */
-    let i_prev: u8 = 9;
+    let i_prev: u8 = 9;         // Change u8 to 
+    // let mut i_prev_vec = vec![i_prev];
+    let mut elgamal_key_bytes = vec![];
+    elgamal_key.serialize(&mut elgamal_key_bytes);
+    // i_prev_vec.resize(elgamal_key_bytes.len(), 0u8);
+    let mut prev_input = vec![];
+    prev_input.extend_from_slice(&elgamal_key_bytes);
+    prev_input.extend_from_slice(&[i_prev]);     // Later, resize i_prev and pad with 0s to support larger index numbers
+    // println!("LENGTH {:?}", elgamal_key_bytes.len());
     
-    let i_bytes = i_prev.to_le_bytes();
-    let mut i_array = [0u8; 32];
-    i_array[..i_bytes.len()].copy_from_slice(&i_bytes);
-    let h_prev = Blake2s::evaluate(&prf_key, &i_array).unwrap();   // output [u8; 32]
+    let mut h_prev_bytes = vec![];
+    let h_prev = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &prev_input).unwrap();
+    h_prev.write(&mut h_prev_bytes);
+
+    let i: u8 = 10;
+    // let mut i_vec = vec![i];
+    let mut cur_input = vec![];
+    cur_input.extend_from_slice(&elgamal_key_bytes);
+    cur_input.extend_from_slice(&[i]);
+    // i_vec.resize(elgamal_key_bytes.len(), 0u8);
+    println!("CUR INPUT OUTSIDE {:?}", cur_input);
+    let h_cur = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &cur_input).unwrap();
 
     let plaintext = JubJub::rand(rng).into_affine();
-    let v_prev = MyEnc::encrypt(&elgamal_param, &pubkey, &plaintext, &elgamal_rand).unwrap();
+    let v_prev = MyEnc::encrypt(&elgamal_param, &elgamal_key, &plaintext, &elgamal_rand).unwrap();
     let mut v_0_bytes = vec![];    // TODO: unify length to check partition later
     // let mut v_0_y_bytes = vec![];
     let mut v_1_bytes = vec![];
@@ -439,28 +370,18 @@ fn main() {
     let mut msg = vec![];
     
     // NOTE: msg ends up being 224 bytes.
-    msg.extend_from_slice(&h_prev);
+    msg.extend_from_slice(&h_prev_bytes);
     msg.extend_from_slice(&v_0_bytes);        // TODO: check partitions too
     // msg.extend_from_slice(&v_0_y_bytes);
     msg.extend_from_slice(&v_1_bytes);
     // msg.extend_from_slice(&v_1_y_bytes);
-    println!("schnorr msg from outside: {:?}", msg);
+    // println!("schnorr msg from outside: {:?}", msg);
 
     let msg2 = msg.clone();
     // let msg3 = msg.clone();
-    
-    /* Generate Poseidon hash parameters for Musig2 */      // 6, 5, 8, 57, 0
-    let (ark, mds) = find_poseidon_ark_and_mds::<ConstraintF<C>> (255, 6, 8, 57, 0);        // ark_bls12_381::FrParameters::MODULUS_BITS = 255
-    let hello: Vec<Fp256<ark_bls12_381::FrParameters>>= ark.clone().into_iter().flatten().collect();
-    println!("ARK LENGTH AS GENERATED {:?}", hello.len());
-    let poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
-        params: MyPoseidonParams::default(),
-        round_keys: ark.into_iter().flatten().collect(),
-        mds_matrix: mds,
-    };
-    
+
     /* AGGREGATE SCHNORR ATTEMPT - WORKS!! */
-    
+
     let schnorr_param = Parameters::<C> {
         generator: C::prime_subgroup_generator().into(),
         salt: Some([0u8; 32]),
@@ -543,48 +464,32 @@ fn main() {
     // let schnorr_verified = Schnorr::<C>::verify(&schnorr_param, &aggregated_pubkey, &msg3, &last_sig).unwrap();
     // println!("schnorr verified outside circuit {:?}", schnorr_verified);
 
-    let mut aggregated_pubkey_bytes = vec![];
-    aggregated_pubkey.serialize(&mut aggregated_pubkey_bytes);
+    // let mut aggregated_pubkey_bytes = vec![];
+    // aggregated_pubkey.serialize(&mut aggregated_pubkey_bytes);
 
     /* Commit to aggregated_pubkey and give it to RP. */
-    let pedersen_randomness = PedersenRandomness(<JubJub as ProjectiveCurve>::ScalarField::rand(rng));
-    let pedersen_params = Commitment::<JubJub, Window>::setup(rng).unwrap();
-    let apk_commit: GroupAffine<EdwardsParameters> = Commitment::<JubJub, Window>::commit(&pedersen_params, &aggregated_pubkey_bytes, &pedersen_randomness).unwrap();
+    // let pedersen_randomness = PedersenRandomness(<JubJub as ProjectiveCurve>::ScalarField::rand(rng));
+    // let pedersen_params = Commitment::<JubJub, Window>::setup(rng).unwrap();
+    // let apk_commit: GroupAffine<EdwardsParameters> = Commitment::<JubJub, Window>::commit(&pedersen_params, &aggregated_pubkey_bytes, &pedersen_randomness).unwrap();
     // THIS IS TWISTED EDWARDS
 
-    // let heloo: Fp256<ark_bls12_381::FrParameters> = apk_commit.x;
-    /* Make current record */
-    let i: u8 = 10;
-    let i_bytes = i.to_le_bytes();
-    let mut i_array = [0u8; 32];
-    i_array[..i_bytes.len()].copy_from_slice(&i_bytes);
-
-    let h_cur = Blake2s::evaluate(&prf_key, &i_array).unwrap();
+    let end = start.elapsed();
+    println!("User and log generate variables: {:?}", end);
     // let mut result = [0u64; 4]; // Array to hold the 8 resulting i32 values
-
-    // for (i, chunk) in h_cur.chunks_exact(8).enumerate() {
-    //     let array: [u8; 8] = chunk.try_into().expect("Slice with incorrect length");
-    //     result[i] = u64::from_le_bytes(array);
-    // }
-    
-    // let h_cur_biginteger = BigInteger256::new(result);
-
-    // // let h_cur_biginteger = BigInteger256::from(result);
-    // let h_cur_fe =ark_bls12_381::FrParameters>::new(h_cur_biginteger);
 
     let insert_circuit_for_setup = InsertCircuit::<W, C, GG> {
         first_login: None,
         schnorr_params: None,
         schnorr_apk: None,
-        apk_commit_x: Some(apk_commit.x),
-        apk_commit_y: Some(apk_commit.y),
-        pedersen_params: None,
-        pedersen_rand: None,
+        // apk_commit_x: Some(apk_commit.x),
+        // apk_commit_y: Some(apk_commit.y),
+        // pedersen_params: None,
+        // pedersen_rand: None,
         poseidon_params: None,
         schnorr_sig: None,
         h_prev: None,
         v_prev: None,
-        prf_key: None,
+        elgamal_key: None,
         h_cur: None,
         i: None,
         _curve_var: PhantomData::<GG>,
@@ -592,20 +497,20 @@ fn main() {
     };
 
     let start = Instant::now();
-    println!("before setup");
+    // println!("before setup");
     let (pk, vk) = Groth16::<E>::circuit_specific_setup(insert_circuit_for_setup, rng).unwrap();
-    println!("after setup");
+    // println!("after setup");
     
-    let setup_time = start.elapsed();
+    // let setup_time = start.elapsed();
 
-    println!("Setup time: {:?}", setup_time.as_millis());
+    // println!("Setup time: {:?}", setup_time.as_millis());
 
-    let start = Instant::now();
+    // let start = Instant::now();
     let pvk: ark_groth16::PreparedVerifyingKey<E> = Groth16::<E>::process_vk(&vk).unwrap();
-    println!("LENGTH:");
-    println!("{}", pvk.vk.gamma_abc_g1.len());
+    // println!("LENGTH:");
+    // println!("{}", pvk.vk.gamma_abc_g1.len());
     let vk_time = start.elapsed();
-    println!("VK preprocessing time: {:?}", vk_time.as_millis());
+    println!("Setup time: {:?}", vk_time.as_millis());
 
     // let returning_user_circuit = InsertCircuit::<W,C,GG> {
     //     first_login: Some(true),
@@ -630,15 +535,15 @@ fn main() {
         first_login: None,
         schnorr_params: Some(schnorr_param),
         schnorr_apk: Some(aggregated_pubkey),
-        apk_commit_x: Some(apk_commit.x),
-        apk_commit_y: Some(apk_commit.y),
-        pedersen_params:  Some(pedersen_params),
+        // apk_commit_x: Some(apk_commit.x),
+        // apk_commit_y: Some(apk_commit.y),
+        // pedersen_params:  Some(pedersen_params),
         poseidon_params: Some(poseidon_params),
-        pedersen_rand: Some(pedersen_randomness),
+        // pedersen_rand: Some(pedersen_randomness),
         schnorr_sig: Some(last_sig),
         h_prev: Some(h_prev),
         v_prev:  Some(v_prev),
-        prf_key: Some(prf_key),
+        elgamal_key: Some(elgamal_key),
         h_cur: Some(h_cur),
         i: Some(i),
         _curve_var: PhantomData::<GG>,
@@ -654,11 +559,11 @@ fn main() {
     ).unwrap();
     let proof_time = start.elapsed();
 
-    println!("Proof time: {:?}", proof_time.as_millis());
+    println!("Prove time: {:?}", proof_time.as_millis());
 
     let public_inputs = [      // THESE ARE JUST FIELD ELEMENTS, NEITHER TE NOR SW
-        apk_commit.x,
-        apk_commit.y,
+        aggregated_pubkey.x,
+        aggregated_pubkey.y
     ];
 
     let start = Instant::now();
