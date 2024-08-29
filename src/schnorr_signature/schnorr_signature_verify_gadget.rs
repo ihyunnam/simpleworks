@@ -82,22 +82,35 @@ where
         poseidon_params: &PoseidonRoundParamsVar<ConstraintF<C>, MyPoseidonParams>,
     ) -> Result<Boolean<ConstraintF<C>>, SynthesisError> {
         let prover_response = signature.prover_response.clone();
+        let mut input = vec![];
         let verifier_challenge = signature.verifier_challenge.value().unwrap_or(vec![0u8;32]).clone();
-
+        // println!("verifier chal length {:?}", verifier_challenge.len());
+        input.extend(verifier_challenge);
+        input.extend([0u8;63]);
         let poseidon_params = &poseidon_params.params;
+
+        let compare = UInt8::<ConstraintF<C>>::new_witness_vec(
+            cs.clone(),
+            &mut input
+        ).unwrap();
 
         let pubkey_affine = public_key.pub_key.value().unwrap_or(C::default()).into_affine();
         let mut agg_pubkey_serialized = vec![];
         pubkey_affine.serialize(&mut agg_pubkey_serialized);
-
-        let message = message.value().unwrap_or(vec![0u8;96]);
-        
-        let hash1 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(poseidon_params, &verifier_challenge).unwrap();
+        // input.extend(agg_pubkey_serialized);
+        let mut message = message.value().unwrap_or(vec![0u8;95]);
+        message.extend([0u8;70]);
+        // input.extend(message);
+        // input.extend([0u8;60]);
+        // println!("here1");
+        let hash1 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(poseidon_params, &input).unwrap();
         let hash2 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(poseidon_params, &agg_pubkey_serialized).unwrap();
+        // println!("here2");
         let hash3 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(poseidon_params, &message).unwrap();
 
         let mut final_vector = vec![];
         let mut temp_vector = vec![];
+        // let mut temp_vector = vec![];
         hash1.serialize(&mut temp_vector).unwrap();
         final_vector.extend(&temp_vector);
         temp_vector.clear();
@@ -106,23 +119,37 @@ where
         temp_vector.clear();
         hash3.serialize(&mut temp_vector).unwrap();
         final_vector.extend(&temp_vector);
-        temp_vector.clear();
+        // temp_vector.clear();
 
-        let mut reader = Cursor::new(prover_response.value().unwrap_or([0u8;32].to_vec()));
+        let mut reader = Cursor::new(prover_response.value().unwrap_or([0u8;95].to_vec()));
         let prover_response_fe = C::ScalarField::deserialize(&mut reader).unwrap();
 
         let e = C::ScalarField::from_be_bytes_mod_order(final_vector.as_slice()); 
-
+        final_vector.clear();
         let verification_point = parameters.generator.value().unwrap_or(C::default()).into_affine().mul(prover_response_fe).sub(public_key.pub_key.value().unwrap_or(C::default()).into_affine().mul(e)).into_affine();
         // let mut verification_point_bytes: Vec<u8> = vec![];
-        verification_point.serialize(&mut temp_vector);            // Reuse temp_vector to minimize alloc
+        verification_point.serialize(&mut final_vector);            // Reuse temp_vector to minimize alloc
 
         let mut verification_point_wtns: Vec<UInt8<ConstraintF<C>>> = vec![];
-        for coord in temp_vector {
+        for coord in final_vector {
             verification_point_wtns.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
         }
-        
-        Ok(verification_point_wtns.is_eq(&signature.verifier_challenge.clone())?)
+        // println!("here?");
+        // println!("verification_point_wtns length{:?}", verification_point_wtns.len());
+        // let compare = UInt8::<ConstraintF<C>>::new_witness_vec(
+        //     cs.clone(),
+        //     &{
+        //         let mut temp = signature.verifier_challenge.value().unwrap_or(vec![0u8;32]);
+        //         temp.extend([0u8;63]);
+        //         temp
+        //     }
+        // ).unwrap();
+        // let input = vec![];
+        // input.extend(signature.verifier_challenge);
+        // let temp = [UInt8::<ConstraintF<C>>::constant(0);70];
+        // input.extend();
+        // println!("signature.verifier_challenge length{:?}", signature.verifier_challenge.len());
+        Ok(verification_point_wtns.is_eq(&compare)?)
     }
 }
 

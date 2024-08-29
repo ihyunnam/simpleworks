@@ -1248,10 +1248,20 @@ where
     
     let mut final_vector = vec![];
     let mut temp_vector = vec![];
+    // let mut temp_vector = vec![];
 
-    let hash1 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, final_nonce_xonly).unwrap();
+    final_vector.extend(final_nonce_xonly);
+    final_vector.extend([0u8;70]);
+    // final_vector.extend(&agg_pubkey_serialized);
+
+    let hash1 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, final_vector.as_slice()).unwrap();
     let hash2 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, &agg_pubkey_serialized).unwrap();
-    let hash3 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, message.as_ref()).unwrap();
+
+    final_vector.clear();
+    final_vector.extend(message.as_ref());
+    final_vector.extend([0u8;70]);
+    let hash3 = CRH::<ConstraintF<C>,MyPoseidonParams>::evaluate(poseidon_params, final_vector.as_slice()).unwrap();
+    final_vector.clear();
     hash1.serialize(&mut temp_vector).unwrap();
     final_vector.extend(&temp_vector);
     temp_vector.clear();
@@ -1260,7 +1270,7 @@ where
     temp_vector.clear();
     hash3.serialize(&mut temp_vector).unwrap();
     final_vector.extend(&temp_vector);
-    temp_vector.clear();
+    // temp_vector.clear();
 
     S::from(MaybeScalar::from_be_bytes_mod_order(&final_vector))
 }
