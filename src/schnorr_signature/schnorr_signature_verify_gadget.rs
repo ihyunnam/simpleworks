@@ -26,7 +26,7 @@ use super::{
 // use ark_mnt4_753::{MNT4_753 as E, Fr};
 use ark_ff::{bytes, BigInteger, Field, Fp256, FromBytes, PrimeField, Zero};
 // use ark_crypto_primitives::signature::SigVerifyGadget;
-use ark_ec::{ProjectiveCurve, AffineCurve};
+use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_r1cs_std::{ToBitsGadget, ToBytesGadget};
 use ark_r1cs_std::{
     prelude::{AllocVar, Boolean, CurveVar, EqGadget, GroupOpsBounds},
@@ -62,19 +62,19 @@ where
     _group_gadget: PhantomData<*const GC>,
 }
 
-impl<C, GC> SigVerifyGadget<MNT4<Parameters>, Schnorr<C>, ConstraintF<C>> for SchnorrSignatureVerifyGadget<C, GC>
+impl<C, GC> SigVerifyGadget<<MNT4<ark_mnt4_753::Parameters> as PairingEngine>::Fr, Schnorr<C>, ConstraintF<C>> for SchnorrSignatureVerifyGadget<C, GC>
 where
     C: ProjectiveCurve,
     GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
-    Namespace<<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField>: From<ark_relations::r1cs::ConstraintSystemRef<Fp256<ark_ed_on_mnt4_753::FqParameters>>>,
+    Namespace<<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField>: From<ark_relations::r1cs::ConstraintSystemRef<<MNT4<ark_mnt4_753::Parameters> as PairingEngine>::Fr>>,
 {
     type ParametersVar = ParametersVar<C, GC>;
     type PublicKeyVar = PublicKeyVar<C, GC>;
     type SignatureVar = SignatureVar<C, GC>;
 
     fn verify(
-        cs: ConstraintSystemRef<MNT4<Parameters>>,
+        cs: ConstraintSystemRef<<MNT4<ark_mnt4_753::Parameters> as PairingEngine>::Fr>,
         parameters: &Self::ParametersVar,
         public_key: &Self::PublicKeyVar,
         message: &[UInt8<ConstraintF<C>>],
