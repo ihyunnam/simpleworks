@@ -1,6 +1,6 @@
 use ark_crypto_primitives::CRH as CRHTrait;
 use ark_std::UniformRand;
-use ark_bls12_377::FrParameters;
+use ark_bn254::{Bn254, FrParameters};
 use ark_crypto_primitives::signature::SignatureScheme;
 use ark_marlin::ahp::verifier;
 use ark_r1cs_std::{alloc::AllocationMode, R1CSVar};
@@ -21,10 +21,10 @@ use super::{
     // Blake2sParametersVar, 
     ConstraintF,
 };
-// use ark_bls12_377::{Bls12_377 as E, Fr};
+// use ark_bn254::{bn254 as E, Fr};
 use ark_ff::{bytes, BigInteger, Field, Fp256, FromBytes, PrimeField, Zero};
 // use ark_crypto_primitives::signature::SigVerifyGadget;
-use ark_ec::{ProjectiveCurve, AffineCurve};
+use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_r1cs_std::{ToBitsGadget, ToBytesGadget};
 use ark_r1cs_std::{
     prelude::{AllocVar, Boolean, CurveVar, EqGadget, GroupOpsBounds},
@@ -60,19 +60,19 @@ where
     _group_gadget: PhantomData<*const GC>,
 }
 
-impl<C, GC> SigVerifyGadget<Fp256<FrParameters>, Schnorr<C>, ConstraintF<C>> for SchnorrSignatureVerifyGadget<C, GC>
+impl<C, GC> SigVerifyGadget<<Bn254 as PairingEngine>::Fr, Schnorr<C>, ConstraintF<C>> for SchnorrSignatureVerifyGadget<C, GC>
 where
     C: ProjectiveCurve,
     GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
-    Namespace<<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField>: From<ark_relations::r1cs::ConstraintSystemRef<Fp256<ark_ed_on_bls12_377::FqParameters>>>,
+    Namespace<<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField>: From<ark_relations::r1cs::ConstraintSystemRef<<Bn254 as PairingEngine>::Fr>>,
 {
     type ParametersVar = ParametersVar<C, GC>;
     type PublicKeyVar = PublicKeyVar<C, GC>;
     type SignatureVar = SignatureVar<C, GC>;
 
     fn verify(
-        cs: ConstraintSystemRef<Fp256<FrParameters>>,
+        cs: ConstraintSystemRef<<Bn254 as PairingEngine>::Fr>,
         parameters: &Self::ParametersVar,
         public_key: &Self::PublicKeyVar,
         message: &[UInt8<ConstraintF<C>>],
