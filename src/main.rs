@@ -418,7 +418,7 @@ fn main() {
         .collect();
 
     let last_sig = signatures.pop().unwrap();
-    println!("LAST SIG OUTSIDE {:?}", last_sig);
+    // println!("LAST SIG OUTSIDE {:?}", last_sig);
 
     // Sig should be verifiable as a standard schnorr signature
     let aggregated_pubkey: PublicKey<C> = key_agg_ctx.aggregated_pubkey();
