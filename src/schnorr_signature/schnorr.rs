@@ -1,12 +1,12 @@
 use std::ops::{Add, Sub};
-use ark_bls12_377::FrParameters;
+use ark_mnt4_753::FrParameters;
 // use subtle::ConstantTimeEq as _;
 use ark_serialize::CanonicalSerialize;
 // use serde::Serialize;
-use ark_ed_on_bls12_377::{EdwardsProjective, EdwardsParameters};
-use ark_bls12_377::G1Projective;
+use ark_ed_on_mnt4_753::{EdwardsProjective, EdwardsParameters};
+use ark_mnt4_753::G1Projective;
 use subtle::Choice;
-// use ark_ed_on_bls12_377::EdwardsProjective as JubJub;
+// use ark_ed_on_mnt4_753::EdwardsProjective as JubJub;
 // type C = EdwardsProjective;
 // type P = EdwardsParameters;
 use std::collections::HashMap;
@@ -47,8 +47,8 @@ impl<F: PrimeField> PoseidonRoundParams<F> for MyPoseidonParams {
 }
 
 // NOTE: 
-// MaybePoint - point on bls12_377 (Affine, like PublicKey?)
-// MaybeScalar - scalarfield element of bls12_377 (basically PrivateKey)
+// MaybePoint - point on mnt4_753 (Affine, like PublicKey?)
+// MaybeScalar - scalarfield element of mnt4_753 (basically PrivateKey)
 
 type MaybePoint = <EdwardsProjective as ProjectiveCurve>::Affine;
 type MaybeScalar = <EdwardsProjective as ProjectiveCurve>::ScalarField; // TODO: same thing as Fr!!!!
