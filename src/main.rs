@@ -33,7 +33,7 @@ use ark_std::Zero;
 // use ark_crypto_primitives::{Error, SignatureScheme};
 use ark_ec::twisted_edwards_extended::{GroupAffine, GroupProjective};
 use ark_ec::{AffineCurve, ModelParameters, PairingEngine, ProjectiveCurve};
-use ark_ed_on_bls12_381::EdwardsParameters;
+use ark_ed_on_bls12_377::EdwardsParameters;
 use ark_ff::{to_bytes, BigInteger, BigInteger256, BitIteratorLE, Fp256, One, PrimeField};
 // use ark_ec::{ProjectiveCurve};
 use ark_ff::{
@@ -42,7 +42,7 @@ use ark_ff::{
     UniformRand,
 };
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
-use ark_bls12_381::{Bls12_381 as E, Fr};
+use ark_bls12_377::{Bls12_377 as E, Fr};
 use ark_r1cs_std::{
     alloc::AllocVar,
     eq::EqGadget,
@@ -76,7 +76,7 @@ use ark_crypto_primitives::{
     signature::{SignatureScheme},
 };
 use ark_relations::r1cs::{ConstraintSystem, ConstraintLayer, SynthesisError, ConstraintSynthesizer, ConstraintSystemRef, SynthesisMode, TracingMode::{All, OnlyConstraints}};
-use ark_ed_on_bls12_381::{constraints::EdwardsVar, EdwardsProjective as JubJub};   // Fq2: finite field, JubJub: curve group
+use ark_ed_on_bls12_377::{constraints::EdwardsVar, EdwardsProjective as JubJub};   // Fq2: finite field, JubJub: curve group
 use ark_std::marker::PhantomData;
 
 type W = Window;
@@ -97,8 +97,8 @@ pub struct InsertCircuit<W, C: ProjectiveCurve, GG: CurveVar<C, ConstraintF<C>>>
     first_login: Option<bool>,
     schnorr_params: Option<Parameters<C>>,
     schnorr_apk: Option<C::Affine>,
-    // apk_commit_x: Option<ark_ff::Fp256<ark_bls12_381::FrParameters>>,
-    // apk_commit_y: Option<ark_ff::Fp256<ark_bls12_381::FrParameters>>,
+    // apk_commit_x: Option<ark_ff::Fp256<ark_bls12_377::FrParameters>>,
+    // apk_commit_y: Option<ark_ff::Fp256<ark_bls12_377::FrParameters>>,
     // pedersen_rand: Option<PedersenRandomness<C>>,
     // pedersen_params: Option<PedersenParameters<C>>,
     poseidon_params: Option<Poseidon::<ConstraintF<C>, MyPoseidonParams>>,
@@ -295,7 +295,7 @@ fn main() {
 
     /* Generate Poseidon hash parameters for both Schnorr signature (Musig2) and v_i */      // 6, 5, 8, 57, 0
     
-    let (ark, mds) = find_poseidon_ark_and_mds::<ConstraintF<C>> (255, 6, 8, 57, 0);        // ark_bls12_381::FrParameters::MODULUS_BITS = 255
+    let (ark, mds) = find_poseidon_ark_and_mds::<ConstraintF<C>> (255, 6, 8, 57, 0);        // ark_bls12_377::FrParameters::MODULUS_BITS = 255
     let poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
         params: MyPoseidonParams::default(),
         round_keys: ark.into_iter().flatten().collect(),

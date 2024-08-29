@@ -1,6 +1,6 @@
 use ark_crypto_primitives::CRH as CRHTrait;
 use ark_std::UniformRand;
-use ark_bls12_381::FrParameters;
+use ark_bls12_377::FrParameters;
 use ark_crypto_primitives::signature::SignatureScheme;
 use ark_marlin::ahp::verifier;
 use ark_r1cs_std::{alloc::AllocationMode, R1CSVar};
@@ -21,7 +21,7 @@ use super::{
     // Blake2sParametersVar, 
     ConstraintF,
 };
-// use ark_bls12_381::{Bls12_381 as E, Fr};
+// use ark_bls12_377::{Bls12_377 as E, Fr};
 use ark_ff::{bytes, BigInteger, Field, Fp256, FromBytes, PrimeField, Zero};
 // use ark_crypto_primitives::signature::SigVerifyGadget;
 use ark_ec::{ProjectiveCurve, AffineCurve};
@@ -65,7 +65,7 @@ where
     C: ProjectiveCurve,
     GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
-    Namespace<<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField>: From<ark_relations::r1cs::ConstraintSystemRef<Fp256<ark_ed_on_bls12_381::FqParameters>>>,
+    Namespace<<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField>: From<ark_relations::r1cs::ConstraintSystemRef<Fp256<ark_ed_on_bls12_377::FqParameters>>>,
 {
     type ParametersVar = ParametersVar<C, GC>;
     type PublicKeyVar = PublicKeyVar<C, GC>;

@@ -3,10 +3,10 @@ use ark_bls12_377::FrParameters;
 // use subtle::ConstantTimeEq as _;
 use ark_serialize::CanonicalSerialize;
 // use serde::Serialize;
-use ark_ed_on_bls12_381::{EdwardsProjective, EdwardsParameters};
-use ark_bls12_381::G1Projective;
+use ark_ed_on_bls12_377::{EdwardsProjective, EdwardsParameters};
+use ark_bls12_377::G1Projective;
 use subtle::Choice;
-// use ark_ed_on_bls12_381::EdwardsProjective as JubJub;
+// use ark_ed_on_bls12_377::EdwardsProjective as JubJub;
 // type C = EdwardsProjective;
 // type P = EdwardsParameters;
 use std::collections::HashMap;
@@ -47,8 +47,8 @@ impl<F: PrimeField> PoseidonRoundParams<F> for MyPoseidonParams {
 }
 
 // NOTE: 
-// MaybePoint - point on bls12_381 (Affine, like PublicKey?)
-// MaybeScalar - scalarfield element of bls12_381 (basically PrivateKey)
+// MaybePoint - point on bls12_377 (Affine, like PublicKey?)
+// MaybeScalar - scalarfield element of bls12_377 (basically PrivateKey)
 
 type MaybePoint = <EdwardsProjective as ProjectiveCurve>::Affine;
 type MaybeScalar = <EdwardsProjective as ProjectiveCurve>::ScalarField; // TODO: same thing as Fr!!!!
@@ -265,7 +265,7 @@ pub fn bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
 // }
 
 /* MUSIG2 IMPLEMENTED BY IHYUN. SOURCE: https://github.com/conduition/musig2.git. 
-    HARDCODED FOR BLS12-381. */
+    HARDCODED FOR BLS12-377. */
 
 fn compute_key_aggregation_coefficient(
     pk_list_hash: &[u8; 32],
@@ -456,7 +456,7 @@ impl SecNonce {
     // generator in pubkey generation = C::prime_subgroup_generator().into()
     pub fn public_nonce(&self) -> PubNonce {
         PubNonce {
-            R1: EdwardsProjective::prime_subgroup_generator().into_affine().mul(self.k1.secret_key).into_affine(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-381.
+            R1: EdwardsProjective::prime_subgroup_generator().into_affine().mul(self.k1.secret_key).into_affine(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-377.
             R2: EdwardsProjective::prime_subgroup_generator().into_affine().mul(self.k2.secret_key).into_affine(),
         }
     }
@@ -1182,7 +1182,7 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     let final_nonce: Point = aggregated_nonce.final_nonce(b);
     // let adapted_nonce = final_nonce + adaptor_point;
 
-    // TODO: DOES PARITY LOGIC STILL STAND FOR BLS12-381?
+    // TODO: DOES PARITY LOGIC STILL STAND FOR BLS12-377?
     // `d` is negated if only one of the parity accumulator OR the aggregated pubkey
     // has odd parity.
     // let d = seckey.negate_if(aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc);
@@ -1203,7 +1203,7 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     // else:
     //   k = (n-k1) + b(n-k2)
     //     = n - (k1 + b*k2)
-    // NOTE: I THINK USING Y-COORDINATE PARITY IS STILL FINE FOR BLS12-381 BECAUSE
+    // NOTE: I THINK USING Y-COORDINATE PARITY IS STILL FINE FOR BLS12-377 BECAUSE
     // POINTS HAVE 2 REPRESENTATIONS FOR POSITIVE AND NEGATIVE Y-COORDINATES STILL APPLY
     // AND THE POINT OF NEGATING IS FOR CONSISTENCY IN GENERATED SIGNATURES ACROSS SIGNERS
     let secnonce_sum = secnonce.k1.secret_key + b * secnonce.k2.secret_key;
@@ -1356,7 +1356,7 @@ pub fn aggregate_partial_adaptor_signatures<S: Into<PartialSignature>> (
     // let adapted_nonce = final_nonce + adaptor_point;
     let mut nonce_x_bytes = vec![];
     final_nonce.serialize(&mut nonce_x_bytes);
-    // NOTE: FOR BLS12-381, X COORDINATE DOESN'T UNIQUELY IDENTIFY THE POINT ON CURVE SO SERIALIZE ENTIRE AFFINE
+    // NOTE: FOR BLS12-377, X COORDINATE DOESN'T UNIQUELY IDENTIFY THE POINT ON CURVE SO SERIALIZE ENTIRE AFFINE
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
     // let nonce_x_bytes = final_nonce.x.serialize();
