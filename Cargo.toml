@@ -28,7 +28,7 @@ ark-r1cs-std = { version = "^0.3.0", default-features = false }
 ark-snark = { version = "^0.3.0", default-features = false }
 ark-serialize = { version = "^0.3.0", default-features = false }
 #ark-crypto-primitives = { version = "^0.3.0", default-features = true, features = [ "r1cs" ] }
-ark-crypto-primitives = { git = "https://github.com/ihyunnam/fork-ark-crypto-primitives-0.3.0.git", rev = "61aa5bf", default-features = false, features = ["r1cs"] }
+ark-crypto-primitives = { git = "https://github.com/ihyunnam/fork-ark-crypto-primitives-0.3.0.git", rev = "d1ce9e7", default-features = false, features = ["r1cs"] }
 #ark-crypto-primitives_04 = { package = "ark-crypto-primitives", version = "0.4.0", default-features = false, features = ["sponge"] }
 ark-sponge = { version = "^0.3.0", default-features = false, features = ["r1cs"] }
 #ark-snark = { version = "0.3.0", default-features = true }

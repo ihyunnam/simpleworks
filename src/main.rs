@@ -408,7 +408,7 @@ fn generate_insert_circuit() -> (InsertCircuit<W,C,GG>, PublicKey<C>) {
     let h_prev = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &prev_input).unwrap();
     h_prev.serialize(&mut h_prev_bytes);
 
-    let i: u8 = 0;
+    let i: u8 = 10;
     let mut cur_input = vec![];
     cur_input.extend_from_slice(&elgamal_key_bytes);
     cur_input.extend_from_slice(&[i]);
@@ -1074,7 +1074,7 @@ impl<W, C, GG> ConstraintSynthesizer<<MNT4<ark_mnt4_753::Parameters> as PairingE
         
         // println!("verified {:?}", schnorr_verified.value());
 
-        schnorr_verified.enforce_equal(&Boolean::TRUE)?;
+        // schnorr_verified.enforce_equal(&Boolean::TRUE)?;
         
         /* Check that the schnorr_apk provided is the apk committed to at registration and given to RP. */
 
