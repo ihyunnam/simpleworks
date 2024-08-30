@@ -1,8 +1,9 @@
 use std::{borrow::Borrow, marker::PhantomData};
 
 use ark_crypto_primitives::encryption::elgamal::constraints::ConstraintF;
-use ark_ec::ProjectiveCurve;
-use ark_ff::to_bytes;
+use ark_ec::CurveGroup;
+use ark_ff_03::to_bytes;
+// use ark_std::simd::ToBytes::to_le_bytes;
 use ark_r1cs_std::{
     prelude::{AllocVar, AllocationMode, CurveVar, GroupOpsBounds},
     uint8::UInt8,
@@ -15,10 +16,10 @@ use super::schnorr::Signature;
 
 #[derive(Derivative)]
 #[derivative(
-    Debug(bound = "C: ProjectiveCurve, GC: CurveVar<C, ConstraintF<C>>"),
-    Clone(bound = "C: ProjectiveCurve, GC: CurveVar<C, ConstraintF<C>>")
+    Debug(bound = "C: CurveGroup, GC: CurveVar<C, ConstraintF<C>>"),
+    Clone(bound = "C: CurveGroup, GC: CurveVar<C, ConstraintF<C>>")
 )]
-pub struct SignatureVar<C: ProjectiveCurve, GC: CurveVar<C, ConstraintF<C>>>
+pub struct SignatureVar<C: CurveGroup, GC: CurveVar<C, ConstraintF<C>>>
 where
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
@@ -30,7 +31,7 @@ where
 
 impl<C, GC> AllocVar<Signature<C>, ConstraintF<C>> for SignatureVar<C, GC>
 where
-    C: ProjectiveCurve,
+    C: CurveGroup,
     GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
@@ -71,7 +72,7 @@ where
 
 impl<C, GC> ToBytesGadget<ConstraintF<C>> for SignatureVar<C, GC>
 where
-    C: ProjectiveCurve,
+    C: CurveGroup,
     GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {

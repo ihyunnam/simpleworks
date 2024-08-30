@@ -3,7 +3,7 @@ use ark_crypto_primitives::crh::poseidon::{CRH , Poseidon, constraints::{Poseido
 use ark_ec::twisted_edwards_extended::GroupProjective;
 use ark_r1cs_std::fields::fp::FpVar;
 // use ark_r1cs_std::UInt128::UInt128;
-use simpleworks::schnorr_signature::schnorr_signature_verify_gadget::SigVerifyGadget;
+// use simpleworks::schnorr_signature::schnorr_signature_verify_gadget::SigVerifyGadget;
 use std::time::Duration;
 use ark_ec::bls12::Bls12;
 use simpleworks::schnorr_signature::schnorr::MyPoseidonParams;
@@ -21,7 +21,7 @@ use ark_ff::{
 // use ark_ec::BN254::BN254;
 use ark_serialize::CanonicalSerialize;
 // use ark_bn254::{bn254 as E, Fr};
-use ark_bn254::{Bn254, Bn254 as E, Parameters};
+// use ark_bn254::{Bn254, Bn254 as E, Parameters};
 use ark_r1cs_std::{
     alloc::AllocVar,
     eq::EqGadget,

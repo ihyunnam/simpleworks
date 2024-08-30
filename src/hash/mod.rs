@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use ark_crypto_primitives::crh::pedersen;
-use ark_crypto_primitives::{
+use ark_crypto_primitives_03::{
     crh::injective_map::{PedersenCRHCompressor, TECompressor},
     CRH,
 };

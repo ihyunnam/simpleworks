@@ -1,7 +1,8 @@
 use std::{borrow::Borrow, marker::PhantomData};
 
 use ark_crypto_primitives::encryption::elgamal::constraints::ConstraintF;
-use ark_ec::ProjectiveCurve;
+use ark_ec::CurveGroup;
+// use ark_ec::CurveGroup;
 use ark_r1cs_std::{
     prelude::{AllocVar, AllocationMode, CurveVar, GroupOpsBounds},
     uint8::UInt8,
@@ -11,7 +12,7 @@ use ark_relations::r1cs::{Namespace, SynthesisError};
 use super::schnorr::Parameters;
 
 #[derive(Clone)]
-pub struct ParametersVar<C: ProjectiveCurve, GC: CurveVar<C, ConstraintF<C>>>
+pub struct ParametersVar<C: CurveGroup, GC: CurveVar<C, ConstraintF<C>>>
 where
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
@@ -22,7 +23,7 @@ where
 
 impl<C, GC> AllocVar<Parameters<C>, ConstraintF<C>> for ParametersVar<C, GC>
 where
-    C: ProjectiveCurve,
+    C: CurveGroup,
     GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {

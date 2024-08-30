@@ -1,18 +1,20 @@
-use ark_crypto_primitives_03::CRH as CRHTrait;
+// use ark_crypto_primitives::crh::pedersen::constraints::CRHParametersVar;
+use ark_crypto_primitives_03::{SignatureScheme, CRH as CRHTrait};
+use ark_ed25519::EdwardsConfig;
 use ark_std::UniformRand;
-use ark_ed25519::Fr;
+// use ark_ed25519::Fr;
 // use ark_ed25519::{Bn254, FrParameters};
-use ark_crypto_primitives::signature::SignatureScheme;
-use ark_marlin::ahp::verifier;
+// use ark_crypto_primitives::signature::SignatureScheme;
+// use ark_marlin::ahp::verifier;
 use ark_r1cs_std::{alloc::AllocationMode, R1CSVar};
 // use crate::schnorr_signature::Signature,
-use ark_crypto_primitives_03::crh::CRHGadget as CRHGadgetTrait;
-use ark_crypto_primitives_03::crh::poseidon::sbox::PoseidonSbox;
-use ark_crypto_primitives_03::crh::poseidon::PoseidonRoundParams;
-use ark_crypto_primitives_03::crh::poseidon::{CRH, Poseidon, constraints::{PoseidonRoundParamsVar, CRHGadget}};
+// use ark_crypto_primitives_03::crh::CRHGadget as CRHGadgetTrait;
+// use ark_crypto_primitives::crh::poseidon::sbox::PoseidonSbox;
+// use ark_crypto_primitives::crh::poseidon::PoseidonRoundParams;
+use ark_crypto_primitives::crh::poseidon::{CRH, constraints::CRHParametersVar};
 use ark_crypto_primitives::signature::schnorr::PublicKey;
 
-use super::schnorr::MyPoseidonParams;
+// use super::schnorr::MyPoseidonParams;
 use super::{
     // blake2s::{ROGadget, RandomOracleGadget},
     parameters_var::ParametersVar,
@@ -25,7 +27,7 @@ use super::{
 // use ark_bn254::{bn254 as E, Fr};
 use ark_ff::{ BigInteger, Field, Fp256, PrimeField, Zero};
 // use ark_crypto_primitives::signature::SigVerifyGadget;
-use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
+use ark_ec::{CurveConfig, CurveGroup};
 use ark_r1cs_std::{ToBitsGadget, ToBytesGadget};
 use ark_r1cs_std::{
     prelude::{AllocVar, Boolean, CurveVar, EqGadget, GroupOpsBounds},
@@ -35,6 +37,8 @@ use ark_relations::r1cs::{ConstraintSystemRef, Namespace, SynthesisError};
 use std::time::Instant;
 use std::{io::Cursor, marker::PhantomData};
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
+
+type Fr = <EdwardsConfig as CurveConfig>::ScalarField;
 
 pub trait SigVerifyGadget<F: Field, S: SignatureScheme, CF: PrimeField> {
     type ParametersVar;
@@ -47,11 +51,11 @@ pub trait SigVerifyGadget<F: Field, S: SignatureScheme, CF: PrimeField> {
         public_key: &Self::PublicKeyVar,
         message: &[UInt8<CF>],
         signature: &Self::SignatureVar,
-        poseidon_params: &PoseidonRoundParamsVar<CF, MyPoseidonParams>,
+        poseidon_params: &CRHParametersVar<Fr>,
     ) -> Result<Boolean<CF>, SynthesisError>;
 }
 
-pub struct SchnorrSignatureVerifyGadget<C: ProjectiveCurve, GC: CurveVar<C, ConstraintF<C>>>
+pub struct SchnorrSignatureVerifyGadget<C: CurveGroup, GC: CurveVar<C, ConstraintF<C>>>
 where
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
@@ -63,10 +67,10 @@ where
 
 impl<C, GC> SigVerifyGadget<Fr, Schnorr<C>, ConstraintF<C>> for SchnorrSignatureVerifyGadget<C, GC>
 where
-    C: ProjectiveCurve,
+    C: CurveGroup,
     GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
-    Namespace<<<C as ProjecsciveCurve>::BaseField as ark_ff::Field>::BasePrimeField>: From<ark_relations::r1cs::ConstraintSystemRef<Fr>>,
+    Namespace<<<C as CurveGroup>::BaseField as ark_ff::Field>::BasePrimeField>: From<ark_relations::r1cs::ConstraintSystemRef<Fr>>,
 {
     type ParametersVar = ParametersVar<C, GC>;
     type PublicKeyVar = PublicKeyVar<C, GC>;
@@ -78,7 +82,7 @@ where
         public_key: &Self::PublicKeyVar,
         message: &[UInt8<ConstraintF<C>>],
         signature: &Self::SignatureVar,
-        poseidon_params: &PoseidonRoundParamsVar<ConstraintF<C>, MyPoseidonParams>,
+        poseidon_params: &CRHParametersVar<Fr>
     ) -> Result<Boolean<ConstraintF<C>>, SynthesisError> {
         let prover_response = signature.prover_response.clone();
         let verifier_challenge = signature.verifier_challenge.value().unwrap_or(vec![0u8;32]).clone();
@@ -90,10 +94,10 @@ where
         pubkey_affine.serialize(&mut agg_pubkey_serialized);
 
         let message = message.value().unwrap_or(vec![0u8;96]);
-        
-        let hash1 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(poseidon_params, &verifier_challenge).unwrap();
-        let hash2 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(poseidon_params, &agg_pubkey_serialized).unwrap();
-        let hash3 = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(poseidon_params, &message).unwrap();
+        // CRHParametersVar::<Fr>::new_witness(cs, || Ok(params)).unwrap();
+        let hash1 = <CRH<Fr> as CRHTrait>::evaluate(poseidon_params, &verifier_challenge).unwrap();
+        let hash2 = <CRH<Fr> as CRHTrait>::evaluate(poseidon_params, &agg_pubkey_serialized).unwrap();
+        let hash3 = <CRH<Fr> as CRHTrait>::evaluate(poseidon_params, &message).unwrap();
 
         let mut final_vector = vec![];
         let mut temp_vector = vec![];

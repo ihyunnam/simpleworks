@@ -1,5 +1,5 @@
 use super::schnorr::PublicKey;
-use ark_ec::ProjectiveCurve;
+use ark_ec::CurveGroup;
 use ark_ff::Field;
 use ark_r1cs_std::{bits::uint8::UInt8, prelude::*};
 use ark_relations::r1cs::{Namespace, SynthesisError};
@@ -7,14 +7,14 @@ use ark_std::vec::Vec;
 use core::{borrow::Borrow, marker::PhantomData};
 use derivative::Derivative;
 
-type ConstraintF<C> = <<C as ProjectiveCurve>::BaseField as Field>::BasePrimeField;
+type ConstraintF<C> = <<C as CurveGroup>::BaseField as Field>::BasePrimeField;
 
 #[derive(Derivative)]
 #[derivative(
-    Debug(bound = "C: ProjectiveCurve, GC: CurveVar<C, ConstraintF<C>>"),
-    Clone(bound = "C: ProjectiveCurve, GC: CurveVar<C, ConstraintF<C>>")
+    Debug(bound = "C: CurveGroup, GC: CurveVar<C, ConstraintF<C>>"),
+    Clone(bound = "C: CurveGroup, GC: CurveVar<C, ConstraintF<C>>")
 )]
-pub struct PublicKeyVar<C: ProjectiveCurve, GC: CurveVar<C, ConstraintF<C>>>
+pub struct PublicKeyVar<C: CurveGroup, GC: CurveVar<C, ConstraintF<C>>>
 where
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
@@ -25,7 +25,7 @@ where
 
 impl<C, GC> AllocVar<PublicKey<C>, ConstraintF<C>> for PublicKeyVar<C, GC>
 where
-    C: ProjectiveCurve,
+    C: CurveGroup,
     GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
@@ -44,7 +44,7 @@ where
 
 impl<C, GC> EqGadget<ConstraintF<C>> for PublicKeyVar<C, GC>
 where
-    C: ProjectiveCurve,
+    C: CurveGroup,
     GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
@@ -76,7 +76,7 @@ where
 
 impl<C, GC> ToBytesGadget<ConstraintF<C>> for PublicKeyVar<C, GC>
 where
-    C: ProjectiveCurve,
+    C: CurveGroup,
     GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
