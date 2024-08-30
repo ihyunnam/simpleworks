@@ -1,14 +1,15 @@
-use ark_crypto_primitives::CRH as CRHTrait;
+use ark_crypto_primitives_03::CRH as CRHTrait;
 use ark_std::UniformRand;
-use ark_bn254::{Bn254, FrParameters};
+use ark_ed25519::Fr;
+// use ark_ed25519::{Bn254, FrParameters};
 use ark_crypto_primitives::signature::SignatureScheme;
 use ark_marlin::ahp::verifier;
 use ark_r1cs_std::{alloc::AllocationMode, R1CSVar};
 // use crate::schnorr_signature::Signature,
-use ark_crypto_primitives::crh::CRHGadget as CRHGadgetTrait;
-use ark_crypto_primitives::crh::poseidon::sbox::PoseidonSbox;
-use ark_crypto_primitives::crh::poseidon::PoseidonRoundParams;
-use ark_crypto_primitives::crh::poseidon::{CRH, Poseidon, constraints::{PoseidonRoundParamsVar, CRHGadget}};
+use ark_crypto_primitives_03::crh::CRHGadget as CRHGadgetTrait;
+use ark_crypto_primitives_03::crh::poseidon::sbox::PoseidonSbox;
+use ark_crypto_primitives_03::crh::poseidon::PoseidonRoundParams;
+use ark_crypto_primitives_03::crh::poseidon::{CRH, Poseidon, constraints::{PoseidonRoundParamsVar, CRHGadget}};
 use ark_crypto_primitives::signature::schnorr::PublicKey;
 
 use super::schnorr::MyPoseidonParams;
@@ -22,7 +23,7 @@ use super::{
     ConstraintF,
 };
 // use ark_bn254::{bn254 as E, Fr};
-use ark_ff::{bytes, BigInteger, Field, Fp256, FromBytes, PrimeField, Zero};
+use ark_ff::{ BigInteger, Field, Fp256, PrimeField, Zero};
 // use ark_crypto_primitives::signature::SigVerifyGadget;
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_r1cs_std::{ToBitsGadget, ToBytesGadget};
@@ -41,7 +42,7 @@ pub trait SigVerifyGadget<F: Field, S: SignatureScheme, CF: PrimeField> {
     type SignatureVar;
 
     fn verify(
-        cs: ConstraintSystemRef<F>,
+        cs: ConstraintSystemRef<Fr>,
         parameters: &Self::ParametersVar,
         public_key: &Self::PublicKeyVar,
         message: &[UInt8<CF>],
@@ -60,19 +61,19 @@ where
     _group_gadget: PhantomData<*const GC>,
 }
 
-impl<C, GC> SigVerifyGadget<<Bn254 as PairingEngine>::Fr, Schnorr<C>, ConstraintF<C>> for SchnorrSignatureVerifyGadget<C, GC>
+impl<C, GC> SigVerifyGadget<Fr, Schnorr<C>, ConstraintF<C>> for SchnorrSignatureVerifyGadget<C, GC>
 where
     C: ProjectiveCurve,
     GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
-    Namespace<<<C as ProjectiveCurve>::BaseField as ark_ff::Field>::BasePrimeField>: From<ark_relations::r1cs::ConstraintSystemRef<<Bn254 as PairingEngine>::Fr>>,
+    Namespace<<<C as ProjecsciveCurve>::BaseField as ark_ff::Field>::BasePrimeField>: From<ark_relations::r1cs::ConstraintSystemRef<Fr>>,
 {
     type ParametersVar = ParametersVar<C, GC>;
     type PublicKeyVar = PublicKeyVar<C, GC>;
     type SignatureVar = SignatureVar<C, GC>;
 
     fn verify(
-        cs: ConstraintSystemRef<<Bn254 as PairingEngine>::Fr>,
+        cs: ConstraintSystemRef<Fr>,
         parameters: &Self::ParametersVar,
         public_key: &Self::PublicKeyVar,
         message: &[UInt8<ConstraintF<C>>],

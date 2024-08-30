@@ -11,7 +11,7 @@ use ark_relations::r1cs::Namespace;
 use ark_std::Zero;
 use ark_ec::twisted_edwards_extended::GroupAffine;
 use ark_ec::{PairingEngine, ProjectiveCurve};
-use ark_ed_on_bn254::EdwardsParameters;
+use ark_ed25519::constraints::EdwardsParameters;
 use ark_ff::{BitIteratorLE, Fp256, One, PrimeField};
 use ark_ff::{
     bytes::ToBytes,

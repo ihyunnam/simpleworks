@@ -1,20 +1,24 @@
 use std::ops::{Add, Sub};
-use ark_bn254::FrParameters;
+// use ark_bn254::FrParameters;
 // use subtle::ConstantTimeEq as _;
 use ark_serialize::CanonicalSerialize;
 // use serde::Serialize;
-use ark_ed_on_bn254::{EdwardsProjective, EdwardsParameters};
-use ark_bn254::G1Projective;
+use ark_ed25519::{EdwardsConfig, EdwardsProjective};
+// use ark_ec_04::{
+//     models::CurveConfig,
+//     twisted_edwards::{Affine, MontCurveConfig, Projective, TECurveConfig},
+// };
+// use ark_bn254::G1Projective;
 use subtle::Choice;
 // use ark_ed_on_bn254::EdwardsProjective as JubJub;
 // type C = EdwardsProjective;
 // type P = EdwardsParameters;
 use std::collections::HashMap;
-use ark_crypto_primitives::crh::{CRH as CRHTrait, poseidon::sbox::PoseidonSbox};
-use ark_crypto_primitives::crh::poseidon::{self, PoseidonRoundParams};
-use ark_crypto_primitives::crh::poseidon::{CRH, Poseidon, constraints::{PoseidonRoundParamsVar}};
+use ark_crypto_primitives_03::crh::{CRH as CRHTrait, poseidon::sbox::PoseidonSbox};
+use ark_crypto_primitives_03::crh::poseidon::{self, PoseidonRoundParams};
+use ark_crypto_primitives_03::crh::poseidon::{CRH, Poseidon, constraints::{PoseidonRoundParamsVar}};
 use sha2::Digest as _;
-use ark_crypto_primitives::{Error, SignatureScheme};
+use ark_crypto_primitives_03::{Error, SignatureScheme};
 use ark_ec::{twisted_edwards_extended::GroupAffine, AffineCurve, ProjectiveCurve, TEModelParameters};
 use ark_ff::{
     bytes::ToBytes, fields::{Field, PrimeField}, to_bytes, BigInteger256, Fp256, FpParameters, ToConstraintField, UniformRand
@@ -27,7 +31,7 @@ use blake2::Blake2s;
 use digest::Digest;
 // use crate::schnorr_signature::{AggregateSignatureScheme};
 use musig2::{
-    errors::{KeyAggError, RoundContributionError, RoundFinalizeError, SignerIndexError, SigningError, VerifyError}, tagged_hashes::{BIP0340_CHALLENGE_TAG_HASHER, KEYAGG_COEFF_TAG_HASHER, KEYAGG_LIST_TAG_HASHER, MUSIG_AUX_TAG_HASHER, MUSIG_NONCECOEF_TAG_HASHER, MUSIG_NONCE_TAG_HASHER}, AdaptorSignature, LiftedSignature, NonceSeed
+    errors::{KeyAggError, RoundContributionError, RoundFinalizeError, SignerIndexError, SigningError, VerifyError}, tagged_hashes::{KEYAGG_COEFF_TAG_HASHER, KEYAGG_LIST_TAG_HASHER, MUSIG_AUX_TAG_HASHER, MUSIG_NONCECOEF_TAG_HASHER, MUSIG_NONCE_TAG_HASHER}, AdaptorSignature, LiftedSignature, NonceSeed
 };
 
 use derivative::Derivative;
@@ -50,8 +54,8 @@ impl<F: PrimeField> PoseidonRoundParams<F> for MyPoseidonParams {
 // MaybePoint - point on bn254 (Affine, like PublicKey?)
 // MaybeScalar - scalarfield element of bn254 (basically PrivateKey)
 
-type MaybePoint = <EdwardsProjective as ProjectiveCurve>::Affine;
-type MaybeScalar = <EdwardsProjective as ProjectiveCurve>::ScalarField; // TODO: same thing as Fr!!!!
+type MaybePoint = EdwardsProjective::Affine;
+type MaybeScalar = EdwardsProjective::ScalarField; // TODO: same thing as Fr!!!!
 
 pub struct Schnorr<C: ProjectiveCurve> {
     _group: PhantomData<C>,
@@ -75,7 +79,7 @@ type ConstraintF<C> = <<C as ProjectiveCurve>::BaseField as Field>::BasePrimeFie
 pub type PublicKey<C> = <C as ProjectiveCurve>::Affine;
 
 /* ADDED BY ME FOR MUSIG2. */
-pub type Point = <EdwardsProjective as ProjectiveCurve>::Affine;
+pub type Point = <ark_ec_04::twisted_edwards::Projective<EdwardsConfig> as ark_ec_04::CurveGroup>::Affine;
 
 #[derive(Clone, Default)]
 pub struct SecretKey<C: ProjectiveCurve> {
@@ -472,7 +476,7 @@ pub struct SecNonceBuilder<'snb> {
 }
 
 impl<'snb> SecNonceBuilder<'snb> {
-    /// Start building a nonce, seeded with the given random data
+    /// Start building a nonceI'm using , seeded with the given random data
     /// source `nonce_seed`, which should either be
     ///
     /// - 32 bytes drawn from a cryptographically secure RNG, OR
