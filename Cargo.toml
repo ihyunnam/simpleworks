@@ -35,6 +35,8 @@ ark-crypto-primitives-03 = { package = "ark-crypto-primitives", git = "https://g
 ark-sponge = { version = "^0.4.0-alpha", default-features = false, features = ["r1cs"] }
 #ark-snark = { version = "0.4.0", default-features = true }
 ark-groth16 = { version = "0.4.0", default-features = true }
+ark-spartan = { git = "https://github.com/arkworks-rs/spartan.git" }
+merlin = "3.0.0"
 
 # ADDED FOR MUSIG2 (AGGREGATABLE SCHNORR)
 musig2 = { version = "0.0.11", default-features = true }

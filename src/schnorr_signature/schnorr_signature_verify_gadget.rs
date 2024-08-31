@@ -98,7 +98,7 @@ where
         // let mut agg_pubkey_serialized = vec![];
         // pubkey_affine.serialize_with_mode(&mut agg_pubkey_serialized, Compress::Yes);
 
-        // let message = message.value().unwrap_or(vec![0u8;96]);
+        let message = message.value().unwrap_or(vec![0u8;96]);
         // // CRHParametersVar::<Fr>::new_witness(cs, || Ok(params)).unwrap();
         // let hash1 = CRH::<Fr>::evaluate(poseidon_params, &verifier_challenge).unwrap();
         // let hash2 = CRH::<Fr>::evaluate(poseidon_params, &agg_pubkey_serialized).unwrap();
@@ -111,7 +111,7 @@ where
         input_vector.clear();
         let hash1 = CRH::<Fr>::evaluate(poseidon_params, [final_nonce_xonly]).unwrap();
         
-        aggregated_pubkey.serialize_with_mode(&mut input_vector, Compress::Yes);
+        pubkey_affine.serialize_with_mode(&mut input_vector, Compress::Yes);
         let aggregated_pubkey = MaybeScalar::from_be_bytes_mod_order(&input_vector);
         input_vector.clear();
         let hash2 = CRH::<Fr>::evaluate(poseidon_params, [aggregated_pubkey]).unwrap();

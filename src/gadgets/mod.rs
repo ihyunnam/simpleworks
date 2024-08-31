@@ -12,8 +12,8 @@ mod field;
 
 mod helpers;
 
-mod poseidon;
-pub use poseidon::poseidon2_hash;
+// mod poseidon;
+// pub use poseidon::poseidon2_hash;
 
 use self::int8::Int8;
 

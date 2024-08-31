@@ -8,6 +8,7 @@ use ark_r1cs_std::{
     uint8::UInt8,
 };
 use ark_relations::r1cs::{Namespace, SynthesisError};
+use bitvec::view::BitView;
 
 use super::schnorr::Parameters;
 
@@ -24,7 +25,7 @@ where
 impl<C, GC> AllocVar<Parameters, ConstraintF<C>> for ParametersVar<C, GC>
 where
     C: CurveGroup,
-    GC: CurveVar<C, ConstraintF<C>> + ark_r1cs_std::alloc::AllocVar<ark_ec::twisted_edwards::Affine<ark_ed25519::EdwardsConfig>, <<C as ark_ec::CurveGroup>::BaseField as ark_ff::Field>::BasePrimeField>,
+    GC: CurveVar<C, ConstraintF<C>>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
     fn new_variable<T: Borrow<Parameters>>(
@@ -34,7 +35,7 @@ where
     ) -> Result<Self, SynthesisError> {
         f().and_then(|val| {
             let cs = cs.into();
-            let generator = GC::new_variable(cs.clone(), || Ok(val.borrow().generator), mode)?;
+            let generator = GC::new_variable_omit_prime_order_check(cs.clone(), || Ok(val.borrow().generator), mode)?;
             let native_salt = val.borrow().salt;
             let mut constraint_salt = Vec::<UInt8<ConstraintF<C>>>::new();
             if let Some(native_salt_value) = native_salt {
@@ -47,7 +48,6 @@ where
                         )?);
                     }
                 }
-
                 return Ok(Self {
                     generator,
                     salt: Some(constraint_salt),
