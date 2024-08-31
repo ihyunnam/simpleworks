@@ -56,7 +56,8 @@ type Fr = <EdwardsConfig as CurveConfig>::ScalarField;      // same as MaybeScal
 // #[derivative(Clone(bound = "C: CurveGroup"), Debug)]
 #[derivative(Clone, Debug)]
 pub struct Parameters {
-    pub generator: EdwardsAffine,
+    // pub generator: <ark_ec::twisted_edwards::Projective<ark_ed25519::EdwardsConfig> as CurveGroup>::Affine,
+    pub generator: <EdwardsProjective as CurveGroup>::Affine,
     pub salt: Option<[u8; 32]>,
 }
 
@@ -66,7 +67,7 @@ type C = EdwardsProjective;
 type ConstraintF<C> = <<C as CurveGroup>::BaseField as Field>::BasePrimeField;
 // type P = PoseidonRoundParams<ConstraintF<C>>;
 // type MyEnc = ElGamal<JubJub>;
-pub type PublicKey = EdwardsAffine;
+pub type PublicKey = <ark_ec::twisted_edwards::Projective<ark_ed25519::EdwardsConfig> as CurveGroup>::Affine;
 
 
 /* ADDED BY ME FOR MUSIG2. */
@@ -74,7 +75,6 @@ pub type Point = EdwardsAffine;
 
 #[derive(Clone, Default)]
 pub struct SecretKey<C: CurveGroup> {
-    // pub secret_key: <C::Config as CurveConfig>::ScalarField,
     pub secret_key: <EdwardsConfig as CurveConfig>::ScalarField,
     pub public_key: PublicKey,
     _phantom: PhantomData<C>,
@@ -106,7 +106,7 @@ where
 
     fn setup<R: Rng>(_rng: &mut R) -> Result<Self::Parameters, Error> {
         let salt = None;
-        let generator = EdwardsAffine::generator();
+        let generator = <ark_ec::twisted_edwards::Projective<ark_ed25519::EdwardsConfig> as CurveGroup>::Affine::generator();
 
         Ok(Parameters { generator, salt })
     }
@@ -138,44 +138,44 @@ where
         rng: &mut R,
     ) -> Result<Self::Signature, Error> {
         // (k, e);
-        let (random_scalar, verifier_challenge) = {
-            // Sample a random scalar `k` from the prime scalar field.
-            let random_scalar = <EdwardsConfig as CurveConfig>::ScalarField::rand(rng);
-            // Commit to the random scalar via r := k · G.
-            // This is the prover's first msg in the Sigma protocol.
-            let prover_commitment = parameters.generator.mul(random_scalar).into_affine();
+        // let (random_scalar, verifier_challenge) = {
+        //     // Sample a random scalar `k` from the prime scalar field.
+        //     let random_scalar = <EdwardsConfig as CurveConfig>::ScalarField::rand(rng);
+        //     // Commit to the random scalar via r := k · G.
+        //     // This is the prover's first msg in the Sigma protocol.
+        //     let prover_commitment = parameters.generator.mul(random_scalar).into_affine();
 
-            // Hash everything to get verifier challenge.
-            // e := H(salt || pubkey || r || msg);
-            let mut hash_input = Vec::new();
-            if let Some(salt) = parameters.salt {
-                hash_input.extend_from_slice(&salt);
-            }
-            hash_input.extend_from_slice(&sk.public_key.x.into_bigint().to_bytes_le());         // originally to_bytes![sk.public_key]? but no need to use sign, verify anyways so whatever.
-            hash_input.extend_from_slice(&prover_commitment.x.into_bigint().to_bytes_le());
-            hash_input.extend_from_slice(message);
+        //     // Hash everything to get verifier challenge.
+        //     // e := H(salt || pubkey || r || msg);
+        //     let mut hash_input = Vec::new();
+        //     if let Some(salt) = parameters.salt {
+        //         hash_input.extend_from_slice(&salt);
+        //     }
+        //     hash_input.extend_from_slice(&sk.public_key.x.into_bigint().to_bytes_le());         // originally to_bytes![sk.public_key]? but no need to use sign, verify anyways so whatever.
+        //     hash_input.extend_from_slice(&prover_commitment.x.into_bigint().to_bytes_le());
+        //     hash_input.extend_from_slice(message);
 
-            // let hash_digest = CRH::evaluate(&hash_input);
+        //     // let hash_digest = CRH::evaluate(&hash_input);
 
-            let hash_digest = Blake2s::digest(&hash_input);
-            assert!(hash_digest.len() >= 32);
-            let mut verifier_challenge = [0_u8; 32];
-            verifier_challenge.copy_from_slice(&hash_digest);
+        //     let hash_digest = Blake2s::digest(&hash_input);
+        //     assert!(hash_digest.len() >= 32);
+        //     let mut verifier_challenge = [0_u8; 32];
+        //     verifier_challenge.copy_from_slice(&hash_digest);
 
-            (random_scalar, verifier_challenge)
-        };
+        //     (random_scalar, verifier_challenge)
+        // };
 
-        let verifier_challenge_fe = C::ScalarField::from_be_bytes_mod_order(&verifier_challenge);
+        // let verifier_challenge_fe = C::ScalarField::from_be_bytes_mod_order(&verifier_challenge);
 
-        // k - xe;
-        // let prover_response = random_scalar - (verifier_challenge_fe * sk.secret_key);
-        let signature = Signature {
-            prover_response: <EdwardsConfig as CurveConfig>::ScalarField::rand(rng),
-            verifier_challenge,
-            _phantom: PhantomData::<C>,
-        };
+        // // k - xe;
+        // // let prover_response = random_scalar - (verifier_challenge_fe * sk.secret_key);
+        // let signature = Signature {
+        //     prover_response: <EdwardsConfig as CurveConfig>::ScalarField::rand(rng),
+        //     verifier_challenge,
+        //     _phantom: PhantomData::<C>,
+        // };
 
-        Ok(signature)
+        Ok(Signature::default())
     }
 
     /* NOT USED */

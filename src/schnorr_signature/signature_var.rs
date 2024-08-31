@@ -2,7 +2,7 @@ use std::{borrow::Borrow, marker::PhantomData};
 
 use ark_crypto_primitives::encryption::elgamal::constraints::ConstraintF;
 use ark_ec::CurveGroup;
-use ark_ff::{BigInteger, Field, PrimeField};
+use ark_ff::{BigInteger, PrimeField};
 // use ark_ff_03::to_bytes;
 // use ark_std::simd::ToBytes::to_le_bytes;
 use ark_r1cs_std::{

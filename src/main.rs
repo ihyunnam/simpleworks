@@ -19,7 +19,7 @@ use ark_crypto_primitives::crh::{TwoToOneCRHScheme, TwoToOneCRHSchemeGadget};
 use ark_crypto_primitives::sponge::poseidon::PoseidonConfig;
 use ark_relations::r1cs::{ConstraintMatrices, ConstraintSystem, Namespace, SynthesisMode};
 use ark_std::Zero;
-use ark_ec::{twisted_edwards::Affine, CurveGroup};
+use ark_ec::{twisted_edwards::Affine, AffineRepr, CurveGroup};
 // use ark_ec::{PairingEngine, ProjectiveCurve};
 // use ark_ed25519::EdwardsParameters;
 use ark_ff::{BitIteratorLE, Fp256, One, PrimeField};
@@ -91,11 +91,6 @@ fn generate_logging_circuit() -> (LoggingCircuit<W,C,GG>, PublicKey, <ark_ec::tw
     /* Generate Poseidon hash parameters for both Schnorr signature (Musig2) and v_i */      // 6, 5, 8, 57, 0
     
     let (ark, mds) = find_poseidon_ark_and_mds::<Fr> (255, 2, 8, 24, 0);        // ark_bn254::FrParameters::MODULUS_BITS = 255
-    // let poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
-    //     params: MyPoseidonParams::default(),
-    //     round_keys: ark.into_iter().flatten().collect(),
-    //     mds_matrix: mds,
-    // };
 
     let poseidon_params = PoseidonConfig::<Fr>::new(8, 24, 31, mds, ark, 2, 1);
     /* Assume this is previous record */
@@ -425,12 +420,6 @@ fn generate_insert_circuit() -> (InsertCircuit<W,C,GG>, PublicKey) {
     /* Generate Poseidon hash parameters for both Schnorr signature (Musig2) and v_i */      // 6, 5, 8, 57, 0
     
     let (ark, mds) = find_poseidon_ark_and_mds::<Fr> (255, 2, 8, 24, 0);        // ark_bn254::FrParameters::MODULUS_BITS = 255
-    // let poseidon_params = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
-    //     params: MyPoseidonParams::default(),
-    //     round_keys: ark.into_iter().flatten().collect(),
-    //     mds_matrix: mds,
-    // };
-
     let poseidon_params = PoseidonConfig::<Fr>::new(8, 24, 31, mds, ark, 2, 1);
 
     println!("here5");
@@ -645,6 +634,8 @@ fn generate_logging_circuit_for_setup() -> LoggingCircuit::<W, C, GG> {
     }
 }
 
+// type C::Affine = ark_ec::twisted_edwards::Affine::<EdwardsConfig>;
+
 impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where 
     W: ark_crypto_primitives::crh::pedersen::Window,
     ConstraintF<C>: PrimeField,
@@ -653,17 +644,19 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
     for<'a> &'a GG: ark_r1cs_std::groups::GroupOpsBounds<'a, C, GG>,
     // C::Affine: From<ark_ec::twisted_edwards::GroupAffine<EdwardsParameters>>,
     Namespace<<<C as CurveGroup>::BaseField as Field>::BasePrimeField>: From<ConstraintSystemRef<Fr>>,
-    <C as CurveGroup>::BaseField: PrimeField,
+    // <C as CurveGroup>::BaseField: PrimeField,
+    C: CurveGroup<Affine = ark_ec::twisted_edwards::Affine<ark_ed25519::EdwardsConfig>>,
+    
     // <C as CurveGroup>::BaseField: ark_r1cs_std::select::CondSelectGadget<<C as CurveGroup>::BaseField>,
     // Vec<u8>: Borrow<<C as CurveGroup>::BaseField>,
 {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
-        let default_affine = C::Affine::default();
+        let default_affine = ark_ec::twisted_edwards::Affine::<EdwardsConfig>::default();
         let h_default = Fr::default();      // This is ConstraintF<C>
         let sig_default = Signature::default();
-        let pubkey_default = PublicKey::default();
+        // let pubkey_default = PublicKey::default();
         let schnorr_param_default: SchnorrParameters = SchnorrParameters {
-            generator: EdwardsAffine::default(),
+            generator: default_affine,
             salt: Some([0u8;32]),
         };
 
@@ -730,11 +723,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
         ).unwrap();
 
         /* SCHNORR SIG VERIFY GADGET */
-        // let poseidon_param_default = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
-        //     params: MyPoseidonParams::default(),
-        //     round_keys: vec![<ConstraintF<C>>::zero();455],            // 6 = width hardcoded
-        //     mds_matrix: vec![vec![<ConstraintF<C>>::zero();6];6],
-        // };
+
         let (ark, mds) = find_poseidon_ark_and_mds::<Fr> (255, 2, 8, 24, 0);
         let poseidon_params_default = PoseidonConfig::<Fr>::new(8, 24, 31, mds, ark, 2, 1);
         
@@ -775,17 +764,18 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
         let computed_hash_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
             cs.clone(),
             &{
-                let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&poseidon_param_default);
+                let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&poseidon_params_default);
                 // let mut cur_input = vec![];
                 let elgamal_key = self.elgamal_key.as_ref().unwrap_or(&default_affine);
                 // let mut elgamal_key_bytes = vec![];
-                elgamal_key.serialize(&mut elgamal_key_bytes);
+                elgamal_key.serialize_with_mode(&mut elgamal_key_bytes, Compress::Yes);
                 cur_input.extend_from_slice(&elgamal_key_bytes);
                 cur_input.extend_from_slice(&[*self.i.as_ref().unwrap_or(&0)]);
-                let result = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &cur_input).unwrap();
+                let cur_input_fr = Fr::from_be_bytes_mod_order(&cur_input);
+                let result = CRH::<Fr>::evaluate(&poseidon_params, [cur_input_fr]).unwrap();
                 let mut result_vec = vec![];
                 // result.clear();
-                result.serialize(&mut result_vec);
+                result.serialize_with_mode(&mut result_vec, Compress::Yes);
                 result_vec
             },
         ).unwrap();
@@ -795,11 +785,11 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
         let computed_prev_hash_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
             cs.clone(),
             &{
-                let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&poseidon_param_default);
+                let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&poseidon_params_default);
                 // let mut prev_input = vec![];
                 let elgamal_key = self.elgamal_key.as_ref().unwrap_or(&default_affine);
                 // let mut elgamal_key_bytes = vec![];
-                elgamal_key.serialize(&mut elgamal_key_bytes);
+                elgamal_key.serialize_with_mode(&mut elgamal_key_bytes, Compress::Yes);
 
                 let i_value = self.i.as_ref().unwrap_or(&0);
                 let selected_i_prev = UInt8::<ConstraintF<C>>::conditionally_select(
@@ -811,8 +801,9 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                 cur_input.extend_from_slice(&elgamal_key_bytes);
                 cur_input.extend_from_slice(&[selected_i_prev.value().unwrap()]);
                 elgamal_key_bytes.clear();
-                let result = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &cur_input).unwrap();
-                result.serialize(&mut elgamal_key_bytes);
+                let cur_input_fr = Fr::from_be_bytes_mod_order(&cur_input);
+                let result = CRH::<Fr>::evaluate(&poseidon_params, [cur_input_fr]).unwrap();
+                result.serialize_with_mode(&mut elgamal_key_bytes, Compress::Yes);
 
                 // let output = first_login_wtns.select(&elgamal_key_bytes, &elgamal_key_bytes);
                 elgamal_key_bytes
@@ -870,7 +861,8 @@ pub struct InsertCircuit<W, C: CurveGroup, GG: CurveVar<C, ConstraintF<C>>> {
 
 pub struct LoggingCircuit<W, C: CurveGroup, GG: CurveVar<C, ConstraintF<C>>> {
     pub schnorr_params: Option<SchnorrParameters>,
-    pub schnorr_apk: Option<C::Affine>,
+    // pub schnorr_apk: Option<Affine<EdwardsConfig>>,
+    pub schnorr_apk: Option<PublicKey>,
     pub apk_commit_x: Option<Fq>,
     pub apk_commit_y: Option<Fq>,
     pub pedersen_rand: Option<PedersenRandomness<C>>,
@@ -898,8 +890,8 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
     C: CurveGroup,
     GG: CurveVar<C, ConstraintF<C>>,
     for<'a> &'a GG: ark_r1cs_std::groups::GroupOpsBounds<'a, C, GG>,
-    // C::Affine: From<ark_ec::twisted_edwards::GroupAffine<EdwardsParameters>>,
     Namespace<<<C as CurveGroup>::BaseField as Field>::BasePrimeField>: From<ConstraintSystemRef<Fr>>,
+    C: CurveGroup<Affine = ark_ec::twisted_edwards::Affine<ark_ed25519::EdwardsConfig>>,
 {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> { 
         let affine_default = C::Affine::default();
@@ -914,13 +906,14 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
         //     round_keys: vec![ConstraintF::<C>::zero(); 455], // Assuming 455 is the correct size
         //     mds_matrix: vec![vec![ConstraintF::<C>::zero(); 6]; 6], // Assuming 6x6 MDS matrix
         // };
-        let poseidon_param_default = PoseidonConfig::<Fr>::default();
+        let (ark, mds) = find_poseidon_ark_and_mds::<Fr> (255, 2, 8, 24, 0);
+        let poseidon_params_default = PoseidonConfig::<Fr>::new(8, 24, 31, mds, ark, 2, 1);
         let pedersen_rand_default = PedersenRandomness::<C>::default();
         let pedersen_param_default = PedersenParameters::<C> {
             randomness_generator: vec![],
             generators: vec![vec![];16],        // NUM_WINDOWS=16 hardcoded
         };
-        let pub_input_default = Fr::one();
+        // let pub_input_default = Fr::one();
 
         let mut cur_input = vec![];
         let mut elgamal_key_bytes = vec![];
@@ -930,14 +923,15 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
         let computed_hash_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
             cs.clone(),
             &{
-                let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&poseidon_param_default);
+                let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&poseidon_params_default);
                 let elgamal_key = self.elgamal_key.as_ref().unwrap_or(&affine_default);
                 elgamal_key.serialize_with_mode(&mut elgamal_key_bytes, Compress::Yes);
                 cur_input.extend_from_slice(&elgamal_key_bytes);
                 cur_input.extend_from_slice(&[*self.i.as_ref().unwrap_or(&0)]);
-                let result = <CRH<ConstraintF<C>, MyPoseidonParams> as CRHTrait>::evaluate(&poseidon_params, &cur_input).unwrap();
+                let cur_input_fr = Fr::from_be_bytes_mod_order(&cur_input);
+                let result = CRH::<Fr>::evaluate(&poseidon_params, [cur_input_fr]).unwrap();
                 let mut result_vec = vec![];
-                result.serialize(&mut result_vec);
+                result.serialize_with_mode(&mut result_vec, Compress::Yes);
                 result_vec
             },
         ).unwrap();
@@ -945,7 +939,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
         let h_cur_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
             cs.clone(),
             &{
-                let h_cur = self.h_cur.unwrap_or(pub_input_default);            // TODO: consider serializing outside circuit and passing u8 as input
+                let h_cur = self.h_cur.unwrap_or(Fr::one());            // TODO: consider serializing outside circuit and passing u8 as input
                 let mut h_cur_vec = vec![];
                 h_cur.serialize_with_mode(&mut h_cur_vec, Compress::Yes);
                 h_cur_vec
@@ -956,10 +950,10 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
 
         println!("logging2");
         /* Check elgamal key commitment */
-        let elgamal_commit_x = self.elgamal_key_commit_x.unwrap_or(pub_input_default);
-        let elgamal_commit_y = self.elgamal_key_commit_y.unwrap_or(pub_input_default);
+        let elgamal_commit_x = self.elgamal_key_commit_x.unwrap_or(Fq::one());
+        let elgamal_commit_y = self.elgamal_key_commit_y.unwrap_or(Fq::one());
         
-        let elgamal_commit_proj = C::from(EdwardsAffine::new_unchecked(elgamal_commit_x, elgamal_commit_y).into());       // THIS IS TWISTED EDWARDS
+        let elgamal_commit_proj = C::from(C::Affine::new_unchecked(elgamal_commit_x, elgamal_commit_y));       // THIS IS TWISTED EDWARDS
 
         let reconstructed_commit_var = GG::new_variable_omit_prime_order_check( // VERIFY USED TO FAIL BUT PASSES NOW
             cs.clone(),
@@ -977,7 +971,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
 
                 let mut h_vec = vec![0u8; 32];  // Vec<u8> avoids lifetime issues
                 let pubkey = self.elgamal_key.as_ref().unwrap_or(&default_elgamal_key);
-                pubkey.serialize(&mut h_vec[..]).unwrap();
+                pubkey.serialize_with_mode(&mut h_vec[..], Compress::Yes).unwrap();
             
                 let input = h_vec;
                 
@@ -999,13 +993,12 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
                 // Invoke Pedersen CRH here, to prevent code duplication.
 
                 let crh_parameters = ark_crypto_primitives::crh::pedersen::Parameters {
-                    // randomness_generator: parameters.randomness_generator.clone(),
                     generators: parameters.generators.clone(),
                 };
-                let mut result: C = ark_crypto_primitives::crh::pedersen::CRH::<C,W>::evaluate(&crh_parameters, &input).unwrap().into();
+                let mut result: C = ark_crypto_primitives::crh::pedersen::CRH::<C,W>::evaluate(&crh_parameters, input).unwrap().into();
 
                 // Compute h^r.
-                for (bit, power) in BitIteratorLE::new(randomness.0.into_repr())
+                for (bit, power) in BitIteratorLE::new(randomness.0.into_bigint())
                     .into_iter()
                     .zip(&parameters.randomness_generator)
                 {
@@ -1034,7 +1027,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
         /* Check encryption of correct context (using correct Elgamal key) */
         let default_rand = EncRand::<C>(C::ScalarField::one());
         // let default_param = EncParams::<C>{generator: C::Affine::default()};
-        let default_param = EncParams::<C>{generator: C::Affine::from(GroupAffine::<ark_ed_on_bn254::EdwardsParameters>::new(pub_input_default, pub_input_default).into())};
+        let default_param = EncParams::<C>{ generator: C::Affine::default() };
         let reconstructed_v_cur_wtns = ElgamalCiphertextVar::<C,GG>::new_variable (
             cs.clone(),
             || {
@@ -1045,7 +1038,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
                 // println!("GroupAffine::<ark_ed_on_bn254::EdwardsParameters>::new(*record_x, *record_y).into() {:?}", GroupAffine::<ark_ed_on_bn254::EdwardsParameters>::new(*record_x, *record_y));
                 // let test: GroupProjective::<ark_ed_on_bn254::EdwardsParameters> = GroupAffine::<ark_ed_on_bn254::EdwardsParameters>::new(*record_x, *record_y).into();
                 // println!("test {:?}", test);
-                let record_input = C::Affine::from(GroupAffine::<EdwardsParameters>::new(*record_x, *record_y).into());
+                let record_input: C::Affine = ark_ec::twisted_edwards::Affine::<EdwardsConfig>::new_unchecked(*record_x, *record_y);
 
                 let elgamal_param_input = self.elgamal_params.as_ref().unwrap();
                 let pubkey = self.elgamal_key.as_ref().unwrap();
@@ -1074,8 +1067,9 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
             cs.clone(),
             &{
                 let mut h_bytes = vec![];
-                let h = self.h_cur.as_ref().unwrap_or(&pub_input_default);
-                h.write(&mut h_bytes);
+                let default = Fr::one();
+                let h = self.h_cur.as_ref().unwrap_or(&default);
+                h.serialize_with_mode(&mut h_bytes, Compress::Yes);
                 let default_coords = (C::Affine::default(), C::Affine::default());
                 let mut v_0_bytes = vec![];
                 let mut v_1_bytes = vec![];
@@ -1104,21 +1098,18 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
         ).unwrap();
 
         /* SCHNORR SIG VERIFY GADGET */
-        let poseidon_param_default = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
-            params: MyPoseidonParams::default(),
-            round_keys: vec![<ConstraintF<C>>::zero();455],            // 6 = width hardcoded
-            mds_matrix: vec![vec![<ConstraintF<C>>::zero();6];6],
-        };
+        let (ark, mds) = find_poseidon_ark_and_mds::<Fr> (255, 2, 8, 24, 0);        // ark_bn254::FrParameters::MODULUS_BITS = 255
+        let poseidon_params = PoseidonConfig::<Fr>::new(8, 24, 31, mds, ark, 2, 1);
         
-        let mut poseidon_params_wtns = PoseidonRoundParamsVar::<ConstraintF<C>, MyPoseidonParams>::new_variable(
+        let mut poseidon_params_wtns = CRHParametersVar::<Fr>::new_variable(
             cs.clone(),
-            || Ok(self.poseidon_params.as_ref().unwrap_or(&poseidon_param_default)),
+            || Ok(self.poseidon_params.as_ref().unwrap_or(&poseidon_params_default)),
             AllocationMode::Witness,
         )?;
 
-        let schnorr_apk_input = PublicKeyVar::<C, GG>::new_variable(
+        let schnorr_apk_input = PublicKeyVar::<C,GG>::new_variable(
             cs.clone(),
-            || Ok(self.schnorr_apk.as_ref().unwrap_or(&pubkey_default)),
+            || Ok(self.schnorr_apk.as_ref().unwrap_or(&affine_default)),
             AllocationMode::Input,          // NOTE: this should be witness when RP is verifying circuit
         ).unwrap();
 
@@ -1149,11 +1140,11 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
         
         /* Check that the schnorr_apk provided is the apk committed to at registration and given to RP. */
 
-        let apk_commit_x = self.apk_commit_x.unwrap_or(pub_input_default);
-        let apk_commit_y = self.apk_commit_y.unwrap_or(pub_input_default);
+        let apk_commit_x = self.apk_commit_x.unwrap_or(Fq::one());
+        let apk_commit_y = self.apk_commit_y.unwrap_or(Fq::one());
         
         // println!("here2");
-        let apk_commit_proj = C::from(GroupAffine::<ark_ed_on_bn254::EdwardsParameters>::new(apk_commit_x, apk_commit_y).into());       // THIS IS TWISTED EDWARDS
+        let apk_commit_proj = C::from(EdwardsAffine::new_unchecked(apk_commit_x, apk_commit_y).into());       // THIS IS TWISTED EDWARDS
         // println!("APK COMMIT PROJ {:?}", apk_commit_proj);
         let reconstructed_commit_var = GG::new_variable_omit_prime_order_check( // VERIFY USED TO FAIL BUT PASSES NOW
             cs.clone(),
@@ -1174,8 +1165,8 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
                 let randomness = self.pedersen_rand.as_ref().unwrap_or(&pedersen_rand_default);
 
                 let mut h_vec = vec![0u8; 32];  // Vec<u8> avoids lifetime issues
-                let apk = self.schnorr_apk.as_ref().unwrap_or(&pubkey_default);
-                apk.serialize(&mut h_vec[..]).unwrap();
+                let apk = self.schnorr_apk.as_ref().unwrap_or(&affine_default);
+                apk.serialize_with_mode(&mut h_vec[..], Compress::Yes).unwrap();
 
                 let input = h_vec;
                 
@@ -1200,10 +1191,10 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
                     // randomness_generator: parameters.randomness_generator.clone(),
                     generators: parameters.generators.clone(),
                 };
-                let mut result: C = ark_crypto_primitives::crh::pedersen::CRH::<C,W>::evaluate(&crh_parameters, &input).unwrap().into();
+                let mut result: C = ark_crypto_primitives::crh::pedersen::CRH::<C,W>::evaluate(&crh_parameters, input).unwrap().into();
 
                 // Compute h^r.
-                for (bit, power) in BitIteratorLE::new(randomness.0.into_repr())
+                for (bit, power) in BitIteratorLE::new(randomness.0.into_bigint())
                     .into_iter()
                     .zip(&parameters.randomness_generator)
                 {
