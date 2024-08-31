@@ -2,7 +2,8 @@ use std::{borrow::Borrow, marker::PhantomData};
 
 use ark_crypto_primitives::encryption::elgamal::constraints::ConstraintF;
 use ark_ec::CurveGroup;
-use ark_ff_03::to_bytes;
+use ark_ff::{BigInteger, Field, PrimeField};
+// use ark_ff_03::to_bytes;
 // use ark_std::simd::ToBytes::to_le_bytes;
 use ark_r1cs_std::{
     prelude::{AllocVar, AllocationMode, CurveVar, GroupOpsBounds},
@@ -42,7 +43,8 @@ where
     ) -> Result<Self, SynthesisError> {
         f().and_then(|val| {
             let cs = cs.into();
-            let response_bytes = to_bytes![val.borrow().prover_response].unwrap();
+            // let response_bytes = to_repr![val.borrow().prover_response].unwrap();
+            let response_bytes = val.borrow().prover_response.into_bigint().to_bytes_le();
             // println!("RESPONSE BYTES {:?}", response_bytes);
             let challenge_bytes = val.borrow().verifier_challenge;
             let mut prover_response = Vec::<UInt8<ConstraintF<C>>>::new();

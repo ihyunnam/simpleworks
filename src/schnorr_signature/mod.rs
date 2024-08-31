@@ -33,8 +33,8 @@ pub type ConstraintF<C> = <<C as CurveGroup>::BaseField as Field>::BasePrimeFiel
 pub type SimpleSchnorrConstraintF =
     <<EdwardsProjective as CurveGroup>::BaseField as Field>::BasePrimeField;
 
-pub type SimpleSchnorrParameters = Parameters<EdwardsProjective>;
-pub type SimpleSchnorrPublicKey = PublicKey<EdwardsProjective>;
+pub type SimpleSchnorrParameters = Parameters;
+pub type SimpleSchnorrPublicKey = PublicKey;
 pub type SimpleSchnorrSignature = Signature<EdwardsProjective>;
 pub type SimpleSchnorrMessage = Vec<u8>;
 

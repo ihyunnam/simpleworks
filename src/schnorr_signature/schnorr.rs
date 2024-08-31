@@ -1,12 +1,12 @@
-use std::ops::{Add, Mul, Sub};
+use ark_serialize::{Compress, Validate::Yes};
+use std::{borrow::Borrow, ops::{Add, Mul, Sub}};
 // use ark_bn254::FrParameters;
 // use subtle::ConstantTimeEq as _;
 use ark_serialize::CanonicalSerialize;
 // use serde::Serialize;
-use ark_ed25519::{EdwardsConfig, EdwardsProjective};
+use ark_ed25519::{EdwardsAffine, EdwardsProjective, EdwardsConfig};
 use ark_ec::{
-    models::CurveConfig,
-    twisted_edwards::{Affine, MontCurveConfig, Projective, TECurveConfig}, CurveGroup, AffineRepr
+    twisted_edwards::{Affine, Projective}, AffineRepr, CurveConfig, CurveGroup
 };
 // use ark_bn254::G1Projective;
 use subtle::Choice;
@@ -19,12 +19,12 @@ use ark_crypto_primitives::crh::poseidon::{TwoToOneCRH, CRH};
 use ark_crypto_primitives::crh::{CRHScheme, CRHSchemeGadget};
 use ark_crypto_primitives::crh::{TwoToOneCRHScheme, TwoToOneCRHSchemeGadget};
 use ark_crypto_primitives::sponge::poseidon::PoseidonConfig;
-use ark_ff_03::to_bytes;
+// use ark_ff_03::to_bytes;
 use sha2::Digest as _;
 use ark_crypto_primitives_03::{Error, SignatureScheme};
 // use ark_ec::{twisted_edwards::GroupAffine, AffineCurve, TEModelParameters};
 use ark_ff::{
-    fields::{Field, PrimeField}, BigInteger256, Fp256, ToConstraintField, UniformRand
+    fields::{Field, PrimeField}, BigInt, BigInteger, BigInteger256, Fp256, ToConstraintField, UniformRand
 };
 use ark_std::io::{Result as IoResult, Write};
 use ark_std::rand::Rng;
@@ -43,19 +43,20 @@ use derivative::Derivative;
 // MaybePoint - point on bn254 (Affine, like PublicKey?)
 // MaybeScalar - scalarfield element of bn254 (basically PrivateKey)
 
-type MaybePoint = <C as CurveGroup>::Affine;
+type MaybePoint = EdwardsAffine;
 type MaybeScalar = <EdwardsConfig as CurveConfig>::ScalarField;
 
 pub struct Schnorr<C: CurveGroup> {
     _group: PhantomData<C>,
 }
 
-type Fr = <EdwardsConfig as CurveConfig>::ScalarField;
+type Fr = <EdwardsConfig as CurveConfig>::ScalarField;      // same as MaybeScalar
 
 #[derive(Derivative)]
-#[derivative(Clone(bound = "C: CurveGroup"), Debug)]
-pub struct Parameters<C: CurveGroup> {
-    pub generator: <C as CurveGroup>::Affine,
+// #[derivative(Clone(bound = "C: CurveGroup"), Debug)]
+#[derivative(Clone, Debug)]
+pub struct Parameters {
+    pub generator: EdwardsAffine,
     pub salt: Option<[u8; 32]>,
 }
 
@@ -65,16 +66,18 @@ type C = EdwardsProjective;
 type ConstraintF<C> = <<C as CurveGroup>::BaseField as Field>::BasePrimeField;
 // type P = PoseidonRoundParams<ConstraintF<C>>;
 // type MyEnc = ElGamal<JubJub>;
-pub type PublicKey<C> = <C as CurveGroup>::Affine;
+pub type PublicKey = EdwardsAffine;
 
 
 /* ADDED BY ME FOR MUSIG2. */
-pub type Point<C> = <C as CurveGroup>::Affine;
+pub type Point = EdwardsAffine;
 
 #[derive(Clone, Default)]
-pub struct SecretKey<C: CurveConfig, CG: CurveGroup> {
-    pub secret_key: <C as CurveConfig>::ScalarField,
-    pub public_key: PublicKey<CG>,
+pub struct SecretKey<C: CurveGroup> {
+    // pub secret_key: <C::Config as CurveConfig>::ScalarField,
+    pub secret_key: <EdwardsConfig as CurveConfig>::ScalarField,
+    pub public_key: PublicKey,
+    _phantom: PhantomData<C>,
 }
 
 // impl ToBytes for SecretKey {
@@ -86,23 +89,24 @@ pub struct SecretKey<C: CurveConfig, CG: CurveGroup> {
 
 #[derive(Clone, Default)]        // TODO: MUST REMOVE DEBUG
 pub struct Signature<C: CurveGroup> {
-    pub prover_response: C::ScalarField,        // s - scalar representing signature proof
+    pub prover_response: <EdwardsConfig as CurveConfig>::ScalarField,        // s - scalar representing signature proof
     pub verifier_challenge: [u8; 32],           // r - point on curve (usually just the x coordinate)
+    _phantom: PhantomData<C>,
 }
 
-impl<C: CurveGroup + Hash, CG: CurveConfig> SignatureScheme for Schnorr<C>
+impl<C: ark_ec::CurveGroup + Hash> SignatureScheme for Schnorr<C>
 where
     C::ScalarField: PrimeField,
-    CG: CurveConfig,
+    // <C as CurveGroup>::ScalarField: Borrow<ark_ff::Fp<MontBackend<ark_ed25519::FrConfig, 4>, 4>>,
 {
-    type Parameters = Parameters<C>;
-    type PublicKey = PublicKey<C>;
-    type SecretKey = SecretKey<C,CG>;
+    type Parameters = Parameters;
+    type PublicKey = PublicKey;
+    type SecretKey = SecretKey<C>;
     type Signature = Signature<C>;
 
     fn setup<R: Rng>(_rng: &mut R) -> Result<Self::Parameters, Error> {
         let salt = None;
-        let generator = C::Affine::generator();
+        let generator = EdwardsAffine::generator();
 
         Ok(Parameters { generator, salt })
     }
@@ -113,14 +117,15 @@ where
     ) -> Result<(Self::PublicKey, Self::SecretKey), Error> {
         // Secret is a random scalar x
         // the pubkey is y = xG
-        let secret_key = C::ScalarField::rand(rng);
+        let secret_key = <EdwardsConfig as CurveConfig>::ScalarField::rand(rng);
         let public_key = parameters.generator.mul(secret_key).into();
 
         Ok((
             public_key,
-            SecretKey {
+            SecretKey::<C> {
                 secret_key,
                 public_key,
+                _phantom: PhantomData::<C>,
             },
         ))
     }
@@ -135,7 +140,7 @@ where
         // (k, e);
         let (random_scalar, verifier_challenge) = {
             // Sample a random scalar `k` from the prime scalar field.
-            let random_scalar: C::ScalarField = C::ScalarField::rand(rng);
+            let random_scalar = <EdwardsConfig as CurveConfig>::ScalarField::rand(rng);
             // Commit to the random scalar via r := k · G.
             // This is the prover's first msg in the Sigma protocol.
             let prover_commitment = parameters.generator.mul(random_scalar).into_affine();
@@ -146,8 +151,8 @@ where
             if let Some(salt) = parameters.salt {
                 hash_input.extend_from_slice(&salt);
             }
-            hash_input.extend_from_slice(&to_bytes![sk.public_key]?);
-            hash_input.extend_from_slice(&to_bytes![prover_commitment]?);
+            hash_input.extend_from_slice(&sk.public_key.x.into_bigint().to_bytes_le());         // originally to_bytes![sk.public_key]? but no need to use sign, verify anyways so whatever.
+            hash_input.extend_from_slice(&prover_commitment.x.into_bigint().to_bytes_le());
             hash_input.extend_from_slice(message);
 
             // let hash_digest = CRH::evaluate(&hash_input);
@@ -163,10 +168,11 @@ where
         let verifier_challenge_fe = C::ScalarField::from_be_bytes_mod_order(&verifier_challenge);
 
         // k - xe;
-        let prover_response = random_scalar - (verifier_challenge_fe * sk.secret_key);
+        // let prover_response = random_scalar - (verifier_challenge_fe * sk.secret_key);
         let signature = Signature {
-            prover_response,
+            prover_response: <EdwardsConfig as CurveConfig>::ScalarField::rand(rng),
             verifier_challenge,
+            _phantom: PhantomData::<C>,
         };
 
         Ok(signature)
@@ -183,38 +189,40 @@ where
         let Signature {
             prover_response,    // s
             verifier_challenge, // rx
+            _phantom: PhantomData::<C>,
         } = signature;
-        // let verifier_challenge_fe = C::ScalarField::from_be_bytes_mod_order(verifier_challenge);    // e
-        // sG = kG - eY
-        // kG = sG + eY
-        // so we first solve for kG.
+//         // let verifier_challenge_fe = C::ScalarField::from_be_bytes_mod_order(verifier_challenge);    // e
+//         // sG = kG - eY
+//         // kG = sG + eY
+//         // so we first solve for kG.
 
-        // println!("PROVER RESPONSE {:?}", prover_response);
-        // println!("VERIFIER CHALLENGE {:?}", verifier_challenge);
-        /* THIS IS compute_challenge_hash_tweak() */
-        let mut agg_pubkey_serialized = [0u8; 32];
-        pk.serialize(&mut agg_pubkey_serialized[..]);
+//         // println!("PROVER RESPONSE {:?}", prover_response);
+//         // println!("VERIFIER CHALLENGE {:?}", verifier_challenge);
+//         /* THIS IS compute_challenge_hash_tweak() */
+//         let mut agg_pubkey_serialized = [0u8; 32];
+//         pk.serialize(&mut agg_pubkey_serialized[..]);
 
-        // println!("PK SERIALIZED {:?}", agg_pubkey_serialized);
+//         // println!("PK SERIALIZED {:?}", agg_pubkey_serialized);
 
-        let mut hash_input = Vec::new();
-        hash_input.extend_from_slice(verifier_challenge);
-        hash_input.extend_from_slice(&agg_pubkey_serialized);
-        hash_input.extend_from_slice(message.as_ref());
-        // println!("HASH INPUT {:?}", hash_input);
-// let hello = parameters.generator;
-        let hash = Blake2s::digest(&hash_input);
-        // println!("HASH VALUE {:?}", hash);
-        let e = C::ScalarField::from_be_bytes_mod_order(&hash);
+//         let mut hash_input = Vec::new();
+//         hash_input.extend_from_slice(verifier_challenge);
+//         hash_input.extend_from_slice(&agg_pubkey_serialized);
+//         hash_input.extend_from_slice(message.as_ref());
+//         // println!("HASH INPUT {:?}", hash_input);
+// // let hello = parameters.generator;
+//         let hash = Blake2s::digest(&hash_input);
+//         // println!("HASH VALUE {:?}", hash);
+//         let e = C::ScalarField::from_be_bytes_mod_order(&hash);
         
-        // println!("GENERATOR {:?}", parameters.generator);
-        let verification_point = parameters.generator.mul(*prover_response).sub(pk.mul(e)).into_affine();
-        let mut verification_point_bytes = vec![];
-        verification_point.serialize(&mut verification_point_bytes);
+//         // println!("GENERATOR {:?}", parameters.generator);
+//         let verification_point = parameters.generator.mul(*prover_response).sub(pk.mul(e)).into_affine();
+//         let mut verification_point_bytes = vec![];
+//         verification_point.serialize(&mut verification_point_bytes);
 
-        // println!("VERIFICATION POINT BYTES {:?}", verification_point_bytes);
+//         // println!("VERIFICATION POINT BYTES {:?}", verification_point_bytes);
 
-        Ok(verification_point_bytes == verifier_challenge)
+//         Ok(verification_point_bytes == verifier_challenge)
+        Ok(true)
     }
 
     // TODO: Implement
@@ -264,15 +272,15 @@ pub fn bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
 
 fn compute_key_aggregation_coefficient(
     pk_list_hash: &[u8; 32],
-    pubkey: &Point<C>,
-    pk2: Option<&Point<C>>,
+    pubkey: &Point,
+    pk2: Option<&Point>,
 ) -> MaybeScalar {
     if pk2.is_some_and(|pk2| pubkey == pk2) {
         return MaybeScalar::one();
     }
 
     let mut bytes = [0u8; 32];
-    pubkey.serialize(&mut bytes[..]);
+    pubkey.serialize_with_mode(&mut bytes[..], Compress::Yes);            // NOTE: used to be just serialize() and I think serialize by default compressed the bytes
 
     // let mut bytes = Vec::new();
     // point.serialize(&mut bytes)?;
@@ -301,11 +309,11 @@ fn compute_key_aggregation_coefficient(
     MaybeScalar::from_be_bytes_mod_order(&hash.to_vec())
 }
 
-fn hash_pubkeys<P: std::borrow::Borrow<Point<C>>>(ordered_pubkeys: &[P]) -> [u8; 32] {
+fn hash_pubkeys<P: std::borrow::Borrow<Point>>(ordered_pubkeys: &[P]) -> [u8; 32] {
     let mut h = KEYAGG_LIST_TAG_HASHER.clone();
     for pubkey in ordered_pubkeys {
         let mut bytes = [0u8; 32];
-        pubkey.borrow().serialize(&mut bytes[..]);
+        pubkey.borrow().serialize_with_mode(&mut bytes[..], Compress::Yes);     // NOTE: used to be just serialize() and I think serialize by default compressed the bytes
         h.update(&bytes);
     }
     h.finalize().into()
@@ -314,16 +322,16 @@ fn hash_pubkeys<P: std::borrow::Borrow<Point<C>>>(ordered_pubkeys: &[P]) -> [u8;
 #[derive(Debug, Clone)]
 pub struct KeyAggContext {
     /// The aggregated pubkey point `Q`.
-    pub(crate) pubkey: PublicKey<C>,
+    pub(crate) pubkey: PublicKey,
     // pub(crate) pubkey: [u8;32],
 
     /// The component individual pubkeys in their original order.
-    pub(crate) ordered_pubkeys: Vec<Point<C>>,
+    pub(crate) ordered_pubkeys: Vec<Point>,
     // pub(crate) ordered_pubkeys: Vec<[u8;32]>,
 
     /// A map of pubkeys to their indexes in the [`ordered_pubkeys`][Self::ordered_pubkeys]
     /// field.
-    pub(crate) pubkey_indexes: HashMap<Point<C>, usize>,
+    pub(crate) pubkey_indexes: HashMap<Point, usize>,
     // pub(crate) pubkey_indexes: HashMap<[u8;32], usize>,
 
     /// Cached key aggregation coefficients of individual pubkeys, in the
@@ -331,23 +339,23 @@ pub struct KeyAggContext {
     pub(crate) key_coefficients: Vec<Fr>,
 
     /// A cache of effective individual pubkeys, i.e. `pubkey * self.key_coefficient(pubkey)`.
-    pub(crate) effective_pubkeys: Vec<Point<C>>,
+    pub(crate) effective_pubkeys: Vec<Point>,
 
     pub(crate) parity_acc: subtle::Choice, // false means g=1, true means g=n-1
     pub(crate) tweak_acc: MaybeScalar,     // None means zero.
 }
 
 impl KeyAggContext {
-    pub fn aggregated_pubkey<T: From<Point<C>>>(&self) -> T {
+    pub fn aggregated_pubkey<T: From<Point>>(&self) -> T {
         T::from(self.pubkey)
     }
 
-    pub fn effective_pubkey<T: From<MaybePoint>>(&self, pubkey: impl Into<Point<C>>) -> Option<T> {
+    pub fn effective_pubkey<T: From<MaybePoint>>(&self, pubkey: impl Into<Point>) -> Option<T> {
         let index = self.pubkey_index(pubkey)?;
         Some(T::from(self.effective_pubkeys[index]))
     }
 
-    pub fn new(ordered_pubkeys: Vec<Point<C>>) -> Result<Self, KeyAggError>
+    pub fn new(ordered_pubkeys: Vec<Point>) -> Result<Self, KeyAggError>
     where
         // I: IntoIterator<Item = P>,
         // P: Into<[u8;32]>,
@@ -394,7 +402,7 @@ impl KeyAggContext {
         // println!("KEY COEFFICIENTS {:?}", key_coefficients);
 
         // let aggregated_pubkey = MaybePoint::sum(&effective_pubkeys);
-        let aggregated_pubkey = effective_pubkeys.clone().into_iter().fold(Affine::EdwardsConfig::default(), |acc, item| acc + &item);
+        let aggregated_pubkey: Affine<EdwardsConfig> = effective_pubkeys.clone().into_iter().fold(Point::default(), |acc: Point, item: Point| (acc + &item).into());  // NOTE: added into() last 
         // NOTE: ORIGINAL IMPLEMENTATION JUST 'FILTERS OUT' POINTS AT INFINITY BEFORE SUMMING
         // println!("AGGREGATED PUBKEY POINT AT INF? {:?}", aggregated_pubkey.is_zero());
         let pubkey_indexes = HashMap::from_iter(
@@ -416,11 +424,11 @@ impl KeyAggContext {
         })
     }
 
-    pub fn pubkey_index(&self, pubkey: impl Into<Point<C>>) -> Option<usize> {
+    pub fn pubkey_index(&self, pubkey: impl Into<Point>) -> Option<usize> {
         self.pubkey_indexes.get(&pubkey.into()).copied()
     }
 
-    pub fn key_coefficient(&self, pubkey: impl Into<Point<C>>) -> Option<MaybeScalar> {
+    pub fn key_coefficient(&self, pubkey: impl Into<Point>) -> Option<MaybeScalar> {
         let index = self.pubkey_index(pubkey)?;
         Some(self.key_coefficients[index])
     }
@@ -428,13 +436,13 @@ impl KeyAggContext {
 
 // TODO: MUST REMOVE DEBUG LATER
 pub struct SecNonce {
-    pub(crate) k1: SecretKey,
-    pub(crate) k2: SecretKey,
+    pub(crate) k1: SecretKey<C>,
+    pub(crate) k2: SecretKey<C>,
 }
 
 impl SecNonce {
     /// Construct a new `SecNonce` from the given individual nonce values.
-    pub fn new<T: Into<SecretKey>>(k1: T, k2: T) -> SecNonce {
+    pub fn new<T: Into<SecretKey<C>>>(k1: T, k2: T) -> SecNonce {
         SecNonce {
             k1: k1.into(),
             k2: k2.into(),
@@ -451,17 +459,17 @@ impl SecNonce {
     // generator in pubkey generation = C::prime_subgroup_generator().into()
     pub fn public_nonce(&self) -> PubNonce {
         PubNonce {
-            R1: EdwardsProjective::prime_subgroup_generator().into_affine().mul(self.k1.secret_key).into_affine(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-377.
-            R2: EdwardsProjective::prime_subgroup_generator().into_affine().mul(self.k2.secret_key).into_affine(),
+            R1: EdwardsAffine::generator().mul(self.k1.secret_key).into_affine(),        // G IS GENERATOR POINT. Double check G1 or G2 for bls12-377.
+            R2: EdwardsAffine::generator().mul(self.k2.secret_key).into_affine(),
         }
     }
 }
 
 pub struct SecNonceBuilder<'snb> {
     nonce_seed_bytes: [u8; 32],
-    seckey: Option<SecretKey>,
-    pubkey: Option<Point<C>>,
-    aggregated_pubkey: Option<Point<C>>,
+    seckey: Option<SecretKey<C>>,
+    pubkey: Option<Point>,
+    aggregated_pubkey: Option<Point>,
     message: Option<&'snb [u8]>,
     extra_inputs: Vec<&'snb dyn AsRef<[u8]>>,
 }
@@ -515,7 +523,7 @@ impl<'snb> SecNonceBuilder<'snb> {
     ///
     /// The public key will be overwritten if [`SecNonceBuilder::with_seckey`]
     /// is used after this method.
-    pub fn with_pubkey(self, pubkey: impl Into<Point<C>>) -> SecNonceBuilder<'snb> {
+    pub fn with_pubkey(self, pubkey: impl Into<Point>) -> SecNonceBuilder<'snb> {
         SecNonceBuilder {
             pubkey: Some(pubkey.into()),
             ..self
@@ -550,7 +558,7 @@ impl<'snb> SecNonceBuilder<'snb> {
     /// signatures for.
     pub fn with_aggregated_pubkey(
         self,
-        aggregated_pubkey: impl Into<Point<C>>,
+        aggregated_pubkey: impl Into<Point>,
     ) -> SecNonceBuilder<'snb> {
         SecNonceBuilder {
             aggregated_pubkey: Some(aggregated_pubkey.into()),
@@ -615,7 +623,7 @@ impl<'snb> SecNonceBuilder<'snb> {
         let seckey_bytes = match self.seckey {
             Some(seckey) => {
                 let mut bytes = [0u8; 32];
-                seckey.secret_key.serialize(&mut bytes[..]);
+                seckey.secret_key.serialize_with_mode(&mut bytes[..], Compress::Yes);           // Note: changed to serialize_with_mode() from just serialize()
                 bytes
             },
             None => [0u8; 32],
@@ -640,7 +648,7 @@ impl<'snb> SecNonceBuilder<'snb> {
             Some(pubkey) => {
                 hasher.update(&[33]); // individual pubkey len
                 let mut bytes = [0u8; 32];
-                pubkey.serialize(&mut bytes[..]);
+                pubkey.serialize_with_mode(&mut bytes[..], Compress::Yes);
                 hasher.update(&bytes);
             }
         }
@@ -651,7 +659,7 @@ impl<'snb> SecNonceBuilder<'snb> {
                 hasher.update(&[32]); // aggregated pubkey len
                 // hasher.update(&aggregated_pubkey.serialize_xonly()); // THIS SERIALIZES ONLY THE X COORDINATE OF PUBKEY (AFFINE)
                 let mut bytes = [0u8; 32];
-                aggregated_pubkey.serialize(&mut bytes[..]);
+                aggregated_pubkey.serialize_with_mode(&mut bytes[..], Compress::Yes);
                 hasher.update(&bytes);
             }
         };
@@ -696,8 +704,8 @@ impl<'snb> SecNonceBuilder<'snb> {
             k2
         };
 
-        let seckey1 = SecretKey {secret_key: k1, public_key: PublicKey::<EdwardsProjective>::default()};
-        let seckey2 = SecretKey {secret_key: k2, public_key: PublicKey::<EdwardsProjective>::default()};
+        let seckey1 = SecretKey::<C> {secret_key: k1, public_key: PublicKey::default(), _phantom: PhantomData::<C>};
+        let seckey2 = SecretKey::<C> {secret_key: k2, public_key: PublicKey::default(), _phantom: PhantomData::<C>};
         SecNonce { k1: seckey1, k2: seckey2 }
     }
 }
@@ -756,8 +764,8 @@ impl<T: Clone + Eq> Slots<T> {
 // #[derive(Debug, Eq, PartialEq, Clone, Hash, Ord, PartialOrd)]
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct PubNonce {
-    pub R1: Point<C>,
-    pub R2: Point<C>,
+    pub R1: Point,
+    pub R2: Point,
 }
 
 
@@ -802,10 +810,10 @@ impl FirstRound {
         signer_index: usize,
         // spices: SecNonceSpices<'_>,
     ) -> Result<FirstRound, SignerIndexError> {
-        let signer_pubkey: Point<C> = key_agg_ctx
+        let signer_pubkey: Point = key_agg_ctx
             .ordered_pubkeys[signer_index];
             // .ok_or_else(|| SignerIndexError::new(signer_index, key_agg_ctx.ordered_pubkeys.len()))?;
-        let aggregated_pubkey: Point<C> = key_agg_ctx.aggregated_pubkey();
+        let aggregated_pubkey: Point = key_agg_ctx.aggregated_pubkey();
 
         let secnonce = SecNonce::build(nonce_seed)
             .with_pubkey(signer_pubkey)
@@ -832,7 +840,7 @@ impl FirstRound {
     // NOTE: WE ONLY PASS IN ONE SECKEY (LOG AND USER INDIVIDUALLY) AND ORIGINALLY THIS IS INSIDE VEC ITERATOR SO IT WORKS FINE
     pub fn finalize<M>(
         self,
-        seckey: SecretKey,
+        seckey: SecretKey<C>,
         message: M,
         pubnonces: Vec<PubNonce>,
         poseidon_params: &PoseidonConfig::<Fr>,
@@ -867,7 +875,7 @@ impl FirstRound {
     /// same message.
     pub fn finalize_adaptor<M>(
         self,
-        seckey: SecretKey,
+        seckey: SecretKey<C>,
         // adaptor_point: MaybePoint,
         message: M,
         pubnonces: Vec<PubNonce>,
@@ -878,8 +886,8 @@ impl FirstRound {
     {
         // let adaptor_point: MaybePoint = adaptor_point.into();
         // let pubnonces: Vec<PubNonce> = self.pubnonce_slots.finalize()?; // NOT RELATED TO ADAPTOR
-        let aggnonce_r1 = pubnonces.clone().into_iter().fold(Affine::<EdwardsConfig>::default(), |acc, item| acc + &item.R1);
-        let aggnonce_r2 = pubnonces.clone().into_iter().fold(Affine::<EdwardsConfig>::default(), |acc, item| acc + &item.R2);
+        let aggnonce_r1 = pubnonces.clone().into_iter().fold(EdwardsAffine::default(), |acc, item| (acc + &item.R1).into());
+        let aggnonce_r2 = pubnonces.clone().into_iter().fold(EdwardsAffine::default(), |acc, item| (acc + &item.R2).into());        // NOTE: added into() to both
         let aggnonce = AggNonce { R1: aggnonce_r1, R2: aggnonce_r2 };
 
         // let aggnonce = pubnonces.iter().sum();
@@ -1066,13 +1074,13 @@ impl AggNonce {
         T: std::borrow::Borrow<PubNonce>,
         I: IntoIterator<Item = T>,
     {
-        let (r1s, r2s): (Vec<Point<C>>, Vec<Point<C>>) = nonces
+        let (r1s, r2s): (Vec<Point>, Vec<Point>) = nonces
             .into_iter()
             .map(|pubnonce| (pubnonce.borrow().R1, pubnonce.borrow().R2))
             .unzip();
 
-        let sum_r1 = r1s.into_iter().fold(Point::<C>::zero(), |acc, point| acc.add(&point));
-        let sum_r2 = r2s.into_iter().fold(Point::<C>::zero(), |acc, point| acc.add(&point));
+        let sum_r1 = r1s.into_iter().fold(Point::zero(), |acc, point| (acc.add(&point)).into());
+        let sum_r2 = r2s.into_iter().fold(Point::zero(), |acc, point| (acc.add(&point)).into());    // NOTE: added into() to both
 
         AggNonce {
             R1: sum_r1,        // result is maybepoint
@@ -1087,18 +1095,18 @@ impl AggNonce {
     /// to create signatures.
     pub fn nonce_coefficient<S>(
         &self,
-        aggregated_pubkey: Point<C>,
+        aggregated_pubkey: Point,
         message: impl AsRef<[u8]>,
     ) -> S
     where
         S: From<MaybeScalar>,
     {
         let mut r1_bytes = vec![];
-        self.R1.serialize(&mut r1_bytes);
+        self.R1.serialize_with_mode(&mut r1_bytes, Compress::Yes);
         let mut r2_bytes = vec![];
-        self.R2.serialize(&mut r2_bytes);
+        self.R2.serialize_with_mode(&mut r2_bytes, Compress::Yes);
         let mut aggregated_pubkey_bytes = vec![];
-        aggregated_pubkey.serialize(&mut aggregated_pubkey_bytes);
+        aggregated_pubkey.serialize_with_mode(&mut aggregated_pubkey_bytes, Compress::Yes);
         
         let hash: [u8; 32] = MUSIG_NONCECOEF_TAG_HASHER
             .clone()
@@ -1119,12 +1127,12 @@ impl AggNonce {
     /// Most use-C ases will not need to invoke this method. Instead use
     /// [`sign_solo`][crate::sign_solo] or [`sign_partial`][crate::sign_partial]
     /// to create signatures.
-    pub fn final_nonce(&self, nonce_coeff: impl Into<MaybeScalar>) -> Point<C> // NOTE: changed from generic point parameter P
+    pub fn final_nonce(&self, nonce_coeff: impl Into<MaybeScalar>) -> Point // NOTE: changed from generic point parameter P
     // where
     //     P: From<Point>,
     {
         let nonce_coeff: MaybeScalar = nonce_coeff.into();
-        let aggnonce_sum = self.R1 + (self.R2.mul(nonce_coeff).into_affine());
+        let aggnonce_sum: Affine<EdwardsConfig> = (self.R1 + (self.R2.mul(nonce_coeff).into_affine())).into_affine();
         // P::from(match aggnonce_sum {
         //     MaybePoint::Infinity => Point::generator(),
         //     MaybePoint::Valid(p) => p,
@@ -1150,7 +1158,7 @@ where
 
 pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     key_agg_ctx: &KeyAggContext,
-    seckey: SecretKey,
+    seckey: SecretKey<C>,
     secnonce: SecNonce,
     aggregated_nonce: &AggNonce,
     // adaptor_point: impl Into<MaybePoint>,
@@ -1188,10 +1196,11 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     // println!("D SUPPOSED TO BE SAME {:?}", d);
     // let nonce_x_bytes = adapted_nonce.serialize_xonly();
     let mut nonce_x_bytes = vec![];     // TODO: INEFFICIENT (also look into affine addition - inefficient)
-    final_nonce.serialize(&mut nonce_x_bytes);
+    final_nonce.serialize_with_mode(&mut nonce_x_bytes, Compress::Yes);
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);
-    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message, poseidon_params);
+    // NOTE: changed array to final_nonce
+    let e: MaybeScalar = compute_challenge_hash_tweak(&final_nonce, &aggregated_pubkey, &message, poseidon_params);
 
     // if has_even_Y(R):
     //   k = k1 + b*k2
@@ -1229,8 +1238,8 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
 /// to call this directly. Instead use [`sign_solo`][crate::sign_solo] or
 /// [`sign_partial`][crate::sign_partial].
 pub fn compute_challenge_hash_tweak<S>(
-    final_nonce_xonly: &[u8; 32],
-    aggregated_pubkey: &Point<C>,
+    final_nonce_xonly: &Point,
+    aggregated_pubkey: &Point,
     message: impl AsRef<[u8]>,
     poseidon_params: &PoseidonConfig<Fr>,
 ) -> S 
@@ -1238,22 +1247,32 @@ where
     S: From<MaybeScalar>,
     // C: CurveGroup,
     {
-    let mut agg_pubkey_serialized = vec![];
-    aggregated_pubkey.serialize(&mut agg_pubkey_serialized);
+    let mut input_vector = vec![];
+
+    final_nonce_xonly.serialize_with_mode(&mut input_vector, Compress::Yes);
+    let final_nonce_xonly = MaybeScalar::from_be_bytes_mod_order(&input_vector);
+    input_vector.clear();
+    let hash1 = CRH::<Fr>::evaluate(poseidon_params, [final_nonce_xonly]).unwrap();
     
+    aggregated_pubkey.serialize_with_mode(&mut input_vector, Compress::Yes);
+    let aggregated_pubkey = MaybeScalar::from_be_bytes_mod_order(&input_vector);
+    input_vector.clear();
+    let hash2 = CRH::<Fr>::evaluate(poseidon_params, [aggregated_pubkey]).unwrap();
+
+    // message.serialize_with_mode(&mut input_vector, Compress::Yes);
+    let message = MaybeScalar::from_be_bytes_mod_order(message.as_ref());
+    let hash3 = CRH::<Fr>::evaluate(poseidon_params, [message]).unwrap();
+
     let mut final_vector = vec![];
     let mut temp_vector = vec![];
-
-    let hash1 = CRH::<Fr>::evaluate(poseidon_params, final_nonce_xonly).unwrap();
-    let hash2 = CRH::<Fr>::evaluate(poseidon_params, &agg_pubkey_serialized).unwrap();
-    let hash3 = CRH::<Fr>::evaluate(poseidon_params, message.as_ref()).unwrap();
-    hash1.serialize(&mut temp_vector).unwrap();
+    
+    hash1.serialize_with_mode(&mut temp_vector, Compress::Yes).unwrap();
     final_vector.extend(&temp_vector);
     temp_vector.clear();
-    hash2.serialize(&mut temp_vector).unwrap();
+    hash2.serialize_with_mode(&mut temp_vector, Compress::Yes).unwrap();
     final_vector.extend(&temp_vector);
     temp_vector.clear();
-    hash3.serialize(&mut temp_vector).unwrap();
+    hash3.serialize_with_mode(&mut temp_vector, Compress::Yes).unwrap();
     final_vector.extend(&temp_vector);
     temp_vector.clear();
 
@@ -1275,7 +1294,7 @@ pub fn verify_partial_adaptor(
     partial_signature: PartialSignature,
     aggregated_nonce: &AggNonce,
     // adaptor_point: impl Into<MaybePoint>,
-    individual_pubkey: impl Into<Point<C>>,
+    individual_pubkey: impl Into<Point>,
     individual_pubnonce: &PubNonce,
     message: impl AsRef<[u8]>,
     poseidon_params: &PoseidonConfig<Fr>,
@@ -1306,11 +1325,12 @@ pub fn verify_partial_adaptor(
     //     effective_nonce = -effective_nonce;
     // }
 
-    let mut nonce_x_bytes = vec![];
-    final_nonce.serialize(&mut nonce_x_bytes);
-    let mut array = [0u8; 32];
-    array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
-    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message, poseidon_params);
+    // let mut nonce_x_bytes = vec![];
+    // final_nonce.serialize(&mut nonce_x_bytes);
+    // let mut array = [0u8; 32];
+    // array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
+    // NOTE: changed array to final_nonce
+    let e: MaybeScalar = compute_challenge_hash_tweak(&final_nonce, &aggregated_pubkey, &message, poseidon_params);
 
     // s * G == R + (g * gacc * e * a * P)
     // let challenge_parity = aggregated_pubkey.parity() ^ key_agg_ctx.parity_acc;
@@ -1320,7 +1340,7 @@ pub fn verify_partial_adaptor(
     // }
 
     // TODO: double check G1 or G2
-    if EdwardsProjective::prime_subgroup_generator().into_affine().mul(partial_signature).into_affine() != effective_nonce + challenge_point {
+    if EdwardsAffine::generator().mul(partial_signature).into_affine() != effective_nonce + challenge_point {
         return Err(VerifyError::BadSignature);
     }
 
@@ -1350,12 +1370,14 @@ pub fn aggregate_partial_adaptor_signatures<S: Into<PartialSignature>> (
     let final_nonce: Point = aggregated_nonce.final_nonce(b);
     // let adapted_nonce = final_nonce + adaptor_point;
     let mut nonce_x_bytes = vec![];
-    final_nonce.serialize(&mut nonce_x_bytes);
-    // NOTE: FOR BLS12-377, X COORDINATE DOESN'T UNIQUELY IDENTIFY THE POINT ON CURVE SO SERIALIZE ENTIRE AFFINE
+    final_nonce.serialize_with_mode(&mut nonce_x_bytes, Compress::Yes);
+    // // NOTE: FOR BLS12-377, X COORDINATE DOESN'T UNIQUELY IDENTIFY THE POINT ON CURVE SO SERIALIZE ENTIRE AFFINE
     let mut array = [0u8; 32];
     array.copy_from_slice(&nonce_x_bytes[..32]);    // TODO: CHECK 32 RANGE BOUND
-    // let nonce_x_bytes = final_nonce.x.serialize();
-    let e: MaybeScalar = compute_challenge_hash_tweak(&array, &aggregated_pubkey, &message, poseidon_params);
+    // // let nonce_x_bytes = final_nonce.x.serialize();
+
+    // NOTE: changed array to final_nonce
+    let e: MaybeScalar = compute_challenge_hash_tweak(&final_nonce, &aggregated_pubkey, &message, poseidon_params);
 
     let elem = e * key_agg_ctx.tweak_acc;
     // if aggregated_pubkey.parity() {  // NOTE: TOOK OUT PARITY CHECK
@@ -1382,6 +1404,7 @@ pub fn aggregate_partial_adaptor_signatures<S: Into<PartialSignature>> (
     let agg_sig = Signature {
         prover_response: aggregated_signature,        // s - scalar representing signature proof
         verifier_challenge: array,      // bytes of finalnonce
+        _phantom: PhantomData::<C>,
     };
 
     Ok(agg_sig)

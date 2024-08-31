@@ -21,13 +21,13 @@ where
     _curve: PhantomData<C>,
 }
 
-impl<C, GC> AllocVar<Parameters<C>, ConstraintF<C>> for ParametersVar<C, GC>
+impl<C, GC> AllocVar<Parameters, ConstraintF<C>> for ParametersVar<C, GC>
 where
     C: CurveGroup,
-    GC: CurveVar<C, ConstraintF<C>>,
+    GC: CurveVar<C, ConstraintF<C>> + ark_r1cs_std::alloc::AllocVar<ark_ec::twisted_edwards::Affine<ark_ed25519::EdwardsConfig>, <<C as ark_ec::CurveGroup>::BaseField as ark_ff::Field>::BasePrimeField>,
     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
-    fn new_variable<T: Borrow<Parameters<C>>>(
+    fn new_variable<T: Borrow<Parameters>>(
         cs: impl Into<Namespace<ConstraintF<C>>>,
         f: impl FnOnce() -> Result<T, SynthesisError>,
         mode: AllocationMode,
