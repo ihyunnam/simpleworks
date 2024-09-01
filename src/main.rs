@@ -11,7 +11,7 @@ use ark_sponge::poseidon::find_poseidon_ark_and_mds;
 // use simpleworks::schnorr_signature::schnorr_signature_verify_gadget::SigVerifyGadget;
 use std::time::Duration;
 // use ark_ec::bls12::Bls12;
-use ark_ed25519::{EdwardsAffine, EdwardsConfig, Fq};
+use ark_ed25519::{FrConfig, EdwardsAffine, EdwardsConfig, Fq};
 use ark_crypto_primitives::crh::poseidon::constraints::{CRHGadget, CRHParametersVar, TwoToOneCRHGadget};
 use ark_crypto_primitives::crh::poseidon::{TwoToOneCRH, CRH};
 use ark_crypto_primitives::crh::{CRHScheme, CRHSchemeGadget};
@@ -22,7 +22,7 @@ use ark_std::Zero;
 use ark_ec::{twisted_edwards::Affine, AffineRepr, CurveGroup};
 // use ark_ec::{PairingEngine, ProjectiveCurve};
 // use ark_ed25519::EdwardsParameters;
-use ark_ff::{BitIteratorLE, Fp256, One, PrimeField};
+use ark_ff::{MontBackend, BitIteratorLE, Fp256, Fp, One, PrimeField};
 use ark_ff::{
     // bytes::ToBytes,
     fields::{Field},
@@ -61,7 +61,7 @@ use ark_relations::r1cs::{SynthesisError, ConstraintSynthesizer, ConstraintSyste
 use ark_ed25519::{constraints::EdwardsVar, EdwardsProjective as JubJub};   // Fq2: finite field, JubJub: curve group
 use ark_std::marker::PhantomData;
 
-type Fr = <EdwardsConfig as CurveConfig>::ScalarField;
+type Fr = Fp<MontBackend<FrConfig, 4>, 4>;
 type C = JubJub; 
 type ConstraintF<C> = <<C as CurveGroup>::BaseField as Field>::BasePrimeField;
 type W = Window;
@@ -290,28 +290,21 @@ fn generate_logging_circuit() -> (LoggingCircuit<W,C,GG>, PublicKey, <ark_ec::tw
 
 fn main() {
     // let mut logistics_total: Duration = Duration::default();
-    let mut setup_total: Duration = Duration::default();
+    
     let mut proof_time_total = Duration::default();
     let mut verify_time_total = Duration::default();
     for i in 0..10 {
         println!("InsertCircuit iteration {:?}", i);
-        // let rng = &mut OsRng;
-        // let start = Instant::now();
-        // let (new_circuit, aggregated_pubkey) = generate_insert_circuit();
-        // setup_total += start.elapsed();
-        // let public_inputs = [      // THESE ARE JUST FIELD ELEMENTS, NEITHER TE NOR SW
-        //     aggregated_pubkey.x,
-        //     aggregated_pubkey.y,
-        // ];
-
         let cs: ConstraintSystemRef<Fr> = ConstraintSystem::new_ref();
-        // this Fq must be same as ConstraintMatrices<Fq>
+        let (circuit, _) = generate_insert_circuit();
         cs.set_mode(SynthesisMode::Prove{construct_matrices: true});
+        circuit.generate_constraints(cs.clone())?;
         let matrices: ConstraintMatrices<Fr> = cs.to_matrices().unwrap();
         let num_cons = cs.num_constraints();
         let num_vars = cs.num_witness_variables();
         let num_inputs = cs.num_instance_variables();
-        
+        println!("num cons {:?}", num_cons);
+        println!("num inputs {:?}", num_inputs);
         let a_flat = flatten_vec_vec(matrices.a);
         let b_flat = flatten_vec_vec(matrices.b);
         let c_flat = flatten_vec_vec(matrices.c);
@@ -342,12 +335,12 @@ fn main() {
         println!("verify result: {:?}", verified);
     }
     // println!("InsertCircuit Logistics time: {:?}", logistics_total/10);
-    println!("InsertCircuit Setup time total: {:?}", setup_total/10);
+    // println!("InsertCircuit Setup time total: {:?}", setup_total/10);
     println!("InsertCircuit Prove time: {:?}", proof_time_total.as_millis()/10);
     println!("InsertCircuit Verify time: {:?}", verify_time_total.as_millis()/10);
 
-    let mut logistics_total: Duration = Duration::default();
-    let mut setup_total: Duration = Duration::default();
+    // let mut logistics_total: Duration = Duration::default();
+    // let mut setup_total: Duration = Duration::default();
     let mut proof_time_total = Duration::default();
     let mut verify_time_total = Duration::default();
     for i in 0..10 {
@@ -399,8 +392,8 @@ fn main() {
         verify_time_total += start.elapsed();
         println!("verify result: {:?}", verified);
     }
-    println!("LoggingCircuit Logistics time: {:?}", logistics_total/10);
-    println!("LoggingCircuit Setup time: {:?}", setup_total/10);
+    // println!("LoggingCircuit Logistics time: {:?}", logistics_total/10);
+    // println!("LoggingCircuit Setup time: {:?}", setup_total/10);
     println!("LoggingCircuit Prove time: {:?}", proof_time_total.as_millis()/10);
     println!("LoggingCircuit Verify time: {:?}", verify_time_total.as_millis()/10);
 }
@@ -638,9 +631,10 @@ fn generate_logging_circuit_for_setup() -> LoggingCircuit::<W, C, GG> {
 
 impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where 
     W: ark_crypto_primitives::crh::pedersen::Window,
-    ConstraintF<C>: PrimeField,
+    ConstraintF<C>: Field,
     C: CurveGroup,
     GG: CurveVar<C, ConstraintF<C>>,
+    
     for<'a> &'a GG: ark_r1cs_std::groups::GroupOpsBounds<'a, C, GG>,
     // C::Affine: From<ark_ec::twisted_edwards::GroupAffine<EdwardsParameters>>,
     Namespace<<<C as CurveGroup>::BaseField as Field>::BasePrimeField>: From<ConstraintSystemRef<Fr>>,
