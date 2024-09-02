@@ -14,7 +14,7 @@ use subtle::Choice;
 // type C = EdwardsProjective;
 // type P = EdwardsParameters;
 use std::collections::HashMap;
-use ark_crypto_primitives::crh::poseidon::constraints::{CRHGadget, CRHParametersVar, TwoToOneCRHGadget};
+use ark_crypto_primitives::{crh::poseidon::constraints::{CRHGadget, CRHParametersVar, TwoToOneCRHGadget}, sponge::Absorb};
 use ark_crypto_primitives::crh::poseidon::{TwoToOneCRH, CRH};
 use ark_crypto_primitives::crh::{CRHScheme, CRHSchemeGadget};
 use ark_crypto_primitives::crh::{TwoToOneCRHScheme, TwoToOneCRHSchemeGadget};
@@ -24,7 +24,7 @@ use sha2::Digest as _;
 use ark_crypto_primitives_03::{Error, SignatureScheme};
 // use ark_ec::{twisted_edwards::GroupAffine, AffineCurve, TEModelParameters};
 use ark_ff::{
-    fields::{Field, PrimeField}, BigInt, BigInteger, BigInteger256, Fp256, ToConstraintField, UniformRand
+    fields::{Field, PrimeField}, BigInt, BigInteger, BigInteger256, Fp256, MontBackend, ToConstraintField, UniformRand
 };
 use ark_std::io::{Result as IoResult, Write};
 use ark_std::rand::Rng;
@@ -381,9 +381,6 @@ impl KeyAggContext {
         // println!("pk2 {:?}", pk2);
 
         let pk_list_hash = hash_pubkeys(&ordered_pubkeys);
-        // println!("ORDERED PUBKEYS {:?}", ordered_pubkeys);      // ORDERS ARE CORRECT
-        // println!("ORDERED PUBKEY POINT AT INF? {:?}", ordered_pubkeys[0].is_zero());
-        // println!("ORDERED PUBKEY POINT AT INF? {:?}", ordered_pubkeys[1].is_zero());
 
         // NOTE: THIS DOESN'T CHECK FOR POINTS AT INFINITY. NOT READY FOR PRODUCTION.
         let (effective_pubkeys, key_coefficients): (Vec<Point>, Vec<Fr>) =
@@ -395,16 +392,11 @@ impl KeyAggContext {
                     (pubkey.mul(key_coeff).into_affine(), key_coeff)
                 })
                 .unzip();
-        // println!("EFFECTIVE PUBKEY POINT AT INF? {:?}", effective_pubkeys[0].is_zero());
-        // println!("EFFECTIVE PUBKEY POINT AT INF? {:?}", effective_pubkeys[1].is_zero());
-
-        // println!("EFFECTIVE PUBKEYS {:?}", effective_pubkeys);
-        // println!("KEY COEFFICIENTS {:?}", key_coefficients);
 
         // let aggregated_pubkey = MaybePoint::sum(&effective_pubkeys);
         let aggregated_pubkey: Affine<EdwardsConfig> = effective_pubkeys.clone().into_iter().fold(Point::default(), |acc: Point, item: Point| (acc + &item).into());  // NOTE: added into() last 
+
         // NOTE: ORIGINAL IMPLEMENTATION JUST 'FILTERS OUT' POINTS AT INFINITY BEFORE SUMMING
-        // println!("AGGREGATED PUBKEY POINT AT INF? {:?}", aggregated_pubkey.is_zero());
         let pubkey_indexes = HashMap::from_iter(
             ordered_pubkeys
                 .iter()
@@ -536,7 +528,7 @@ impl<'snb> SecNonceBuilder<'snb> {
     /// Overwrites any public key previously added by
     /// [`SecNonceBuilder::with_pubkey`], as we compute the public key
     /// of the given secret key and add it to the builder.
-    // pub fn with_seckey(self, seckey: impl Into<Fr>) -> SecNonceBuilder<'snb> {
+    // pub fn with_seckey(self, seckey: impl Into<ConstraintF<C>>) -> SecNonceBuilder<'snb> {
     //     let seckey: Fr = seckey.into();
     //     SecNonceBuilder {
     //         seckey: Some(seckey),
@@ -1245,6 +1237,9 @@ pub fn compute_challenge_hash_tweak<S>(
 ) -> S 
 where
     S: From<MaybeScalar>,
+    // <<C as CurveGroup>::BaseField as ark_ff::Field>::BasePrimeField: CurveGroup,
+    // <<C as CurveGroup>::BaseField as ark_ff::Field>::BasePrimeField: Absorb,
+    // [ark_ff::Fp<MontBackend<ark_ed25519::FrConfig, 4>, 4>; 1]: Borrow<[<<C as CurveGroup>::BaseField as ark_ff::Field>::BasePrimeField]>,
     // C: CurveGroup,
     {
     let mut input_vector = vec![];

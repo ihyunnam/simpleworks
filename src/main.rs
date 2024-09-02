@@ -18,7 +18,7 @@ use ark_crypto_primitives::crh::{CRHScheme, CRHSchemeGadget};
 use ark_crypto_primitives::crh::{TwoToOneCRHScheme, TwoToOneCRHSchemeGadget};
 use ark_crypto_primitives::sponge::poseidon::PoseidonConfig;
 use ark_relations::r1cs::{ConstraintMatrices, ConstraintSystem, Namespace, SynthesisMode};
-use ark_std::Zero;
+use ark_std::{Zero, borrow::Borrow};
 use ark_ec::{twisted_edwards::Affine, AffineRepr, CurveGroup};
 // use ark_ec::{PairingEngine, ProjectiveCurve};
 // use ark_ed25519::EdwardsParameters;
@@ -79,7 +79,7 @@ impl ark_crypto_primitives::crh::pedersen::Window for Window {
 /* BELOW IS MAIN FOR LOGGING CIRCUIT */
 
 
-fn generate_logging_circuit() -> (LoggingCircuit<W,C,GG>, PublicKey, <ark_ec::twisted_edwards::Projective<EdwardsConfig> as CurveGroup>::Affine, <ark_ec::twisted_edwards::Projective<EdwardsConfig> as CurveGroup>::Affine) {
+fn generate_logging_circuit() -> LoggingCircuit<W,C,GG> {
     // println!("Entering main.");
     let rng = &mut OsRng;
         
@@ -282,15 +282,12 @@ fn generate_logging_circuit() -> (LoggingCircuit<W,C,GG>, PublicKey, <ark_ec::tw
         h_cur: Some(h_cur),
         i: Some(i),
         _curve_var: PhantomData::<GG>,
-        _window_var: PhantomData::<W>,
+        _window_var: PhantomData::<W>, 
     };
-
-    (new_circuit, aggregated_pubkey, elgamal_commit, apk_commit)
+    new_circuit
 }
 
 fn main() {
-    // let mut logistics_total: Duration = Duration::default();
-    
     let mut proof_time_total = Duration::default();
     let mut verify_time_total = Duration::default();
     for i in 0..10 {
@@ -298,7 +295,7 @@ fn main() {
         let cs: ConstraintSystemRef<Fr> = ConstraintSystem::new_ref();
         let (circuit, _) = generate_insert_circuit();
         cs.set_mode(SynthesisMode::Prove{construct_matrices: true});
-        circuit.generate_constraints(cs.clone())?;
+        circuit.generate_constraints(cs.clone());
         let matrices: ConstraintMatrices<Fr> = cs.to_matrices().unwrap();
         let num_cons = cs.num_constraints();
         let num_vars = cs.num_witness_variables();
@@ -631,18 +628,14 @@ fn generate_logging_circuit_for_setup() -> LoggingCircuit::<W, C, GG> {
 
 impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where 
     W: ark_crypto_primitives::crh::pedersen::Window,
-    ConstraintF<C>: Field,
+    ConstraintF<C>: PrimeField,
     C: CurveGroup,
-    GG: CurveVar<C, ConstraintF<C>>,
-    
+    // GG: CurveVar,
     for<'a> &'a GG: ark_r1cs_std::groups::GroupOpsBounds<'a, C, GG>,
-    // C::Affine: From<ark_ec::twisted_edwards::GroupAffine<EdwardsParameters>>,
     Namespace<<<C as CurveGroup>::BaseField as Field>::BasePrimeField>: From<ConstraintSystemRef<Fr>>,
-    // <C as CurveGroup>::BaseField: PrimeField,
     C: CurveGroup<Affine = ark_ec::twisted_edwards::Affine<ark_ed25519::EdwardsConfig>>,
-    
-    // <C as CurveGroup>::BaseField: ark_r1cs_std::select::CondSelectGadget<<C as CurveGroup>::BaseField>,
-    // Vec<u8>: Borrow<<C as CurveGroup>::BaseField>,
+    <C as CurveGroup>::BaseField: PrimeField,
+    <C as CurveGroup>::BaseField: ark_crypto_primitives::sponge::Absorb,
 {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
         let default_affine = ark_ec::twisted_edwards::Affine::<EdwardsConfig>::default();
@@ -654,15 +647,14 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             salt: Some([0u8;32]),
         };
 
-        let first_login_wtns = Boolean::<ConstraintF<C>>::new_witness(
+        let first_login_wtns = Boolean::<Fr>::new_witness(
             cs.clone(), 
             || {Ok(self.first_login.as_ref().unwrap_or(&false))
         }).unwrap();
 
         /* If first login, i=0 must be true. */
 
-
-        let i_wtns = UInt8::<ConstraintF<C>>::new_witness (
+        let i_wtns = UInt8::<Fr>::new_witness (
             cs.clone(),
             || {
                 let i = self.i.as_ref().unwrap();
@@ -671,14 +663,14 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             }
         ).unwrap();
         
-        let zero_wtns = UInt8::<ConstraintF<C>>::new_witness (
+        let zero_wtns = UInt8::<Fr>::new_witness (
             cs.clone(),
             || { Ok(u8::zero()) }
         ).unwrap();
 
         let supposed_to_be = first_login_wtns.select(&zero_wtns, &i_wtns).unwrap();
 
-        let supposed_to_be_wtns = UInt8::<ConstraintF<C>>::new_witness (
+        let supposed_to_be_wtns = UInt8::<Fr>::new_witness (
             cs.clone(),
             || {
                 Ok(supposed_to_be.value().unwrap_or(u8::one()))
@@ -687,7 +679,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
 
         i_wtns.enforce_equal(&supposed_to_be_wtns);
 
-        let reconstructed_msg_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
+        let reconstructed_msg_wtns = UInt8::<Fr>::new_witness_vec(
             cs.clone(),
             &{
                 let mut h_bytes = vec![];
@@ -710,7 +702,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             }
         ).unwrap();
 
-        let schnorr_param_const = ParametersVar::<C,GG>::new_variable(
+        let schnorr_param_const = ParametersVar::<C>::new_variable(
             cs.clone(),
             || Ok(self.schnorr_params.as_ref().unwrap_or(&schnorr_param_default)),
             AllocationMode::Constant,
@@ -749,13 +741,13 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             &mut poseidon_params_wtns,
         ).unwrap();
         
-        let verified_select: Boolean<ConstraintF<C>> = first_login_wtns.select(&Boolean::TRUE, &schnorr_verified)?;
+        let verified_select: Boolean<Fr> = first_login_wtns.select(&Boolean::TRUE, &schnorr_verified)?;
 
         verified_select.enforce_equal(&Boolean::TRUE)?;
         
         let mut cur_input = vec![];
         let mut elgamal_key_bytes = vec![];
-        let computed_hash_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
+        let computed_hash_wtns = UInt8::<Fr>::new_witness_vec(
             cs.clone(),
             &{
                 let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&poseidon_params_default);
@@ -776,7 +768,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
 
         cur_input.clear();
         elgamal_key_bytes.clear();
-        let computed_prev_hash_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
+        let computed_prev_hash_wtns = UInt8::<Fr>::new_witness_vec(
             cs.clone(),
             &{
                 let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&poseidon_params_default);
@@ -786,10 +778,10 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
                 elgamal_key.serialize_with_mode(&mut elgamal_key_bytes, Compress::Yes);
 
                 let i_value = self.i.as_ref().unwrap_or(&0);
-                let selected_i_prev = UInt8::<ConstraintF<C>>::conditionally_select(
-                    &Boolean::<ConstraintF<C>>::constant(*i_value == 0),
-                    &UInt8::<ConstraintF<C>>::constant(0),
-                    &UInt8::<ConstraintF<C>>::constant(i_value.checked_sub(1).unwrap_or(0)),   // both branches run
+                let selected_i_prev = UInt8::<Fr>::conditionally_select(
+                    &Boolean::<Fr>::constant(*i_value == 0),
+                    &UInt8::<Fr>::constant(0),
+                    &UInt8::<Fr>::constant(i_value.checked_sub(1).unwrap_or(0)),   // both branches run
                 )?;
 
                 cur_input.extend_from_slice(&elgamal_key_bytes);
@@ -804,7 +796,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             },
         ).unwrap();
 
-        let h_cur_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
+        let h_cur_wtns = UInt8::<Fr>::new_witness_vec(
             cs.clone(),
             &{
                 let h_cur = self.h_cur.unwrap_or(h_default);            // TODO: consider serializing outside circuit and passing u8 as input
@@ -814,7 +806,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             },
         ).unwrap();
 
-        let h_prev_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
+        let h_prev_wtns = UInt8::<Fr>::new_witness_vec(
             cs.clone(),
             &{
                 let h_prev = self.h_prev.unwrap_or(h_default);            // TODO: consider serializing outside circuit and passing u8 as input
@@ -828,7 +820,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
 
         let mut ouptut = vec![];
         for i in 0..computed_prev_hash_wtns.len() {
-            let elem = first_login_wtns.select(&h_prev_wtns[i], &computed_prev_hash_wtns[i]).unwrap_or(UInt8::<ConstraintF<C>>::constant(0));
+            let elem = first_login_wtns.select(&h_prev_wtns[i], &computed_prev_hash_wtns[i]).unwrap_or(UInt8::<Fr>::constant(0));
             ouptut.push(elem);
         };
         // first_login_wtns.select(&h_prev_wtns, &computed_prev_hash_wtns).unwrap();
@@ -871,7 +863,7 @@ pub struct LoggingCircuit<W, C: CurveGroup, GG: CurveVar<C, ConstraintF<C>>> {
     pub elgamal_key_commit_x: Option<Fq>,
     pub elgamal_key_commit_y: Option<Fq>,
     pub v_cur: Option<Ciphertext<C>>,
-    pub elgamal_key: Option<EncPubKey<C>>,  
+    pub elgamal_key: Option<EncPubKey<C>>,
     pub h_cur: Option<Fr>,
     pub i: Option<u8>,
     pub _curve_var: PhantomData<GG>,
@@ -886,20 +878,15 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
     for<'a> &'a GG: ark_r1cs_std::groups::GroupOpsBounds<'a, C, GG>,
     Namespace<<<C as CurveGroup>::BaseField as Field>::BasePrimeField>: From<ConstraintSystemRef<Fr>>,
     C: CurveGroup<Affine = ark_ec::twisted_edwards::Affine<ark_ed25519::EdwardsConfig>>,
+    <<C as CurveGroup>::BaseField as Field>::BasePrimeField: ark_crypto_primitives::sponge::Absorb,
 {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> { 
         let affine_default = C::Affine::default();
         let sig_default = Signature::<C>::default();
-        let pubkey_default = PublicKey::default();
         let schnorr_param_default = SchnorrParameters {
             generator: EdwardsAffine::default(),
             salt: Some([0u8; 32]),
         };
-        // let poseidon_param_default = Poseidon::<ConstraintF<C>, MyPoseidonParams> {
-        //     params: MyPoseidonParams::default(),
-        //     round_keys: vec![ConstraintF::<C>::zero(); 455], // Assuming 455 is the correct size
-        //     mds_matrix: vec![vec![ConstraintF::<C>::zero(); 6]; 6], // Assuming 6x6 MDS matrix
-        // };
         let (ark, mds) = find_poseidon_ark_and_mds::<Fr> (255, 2, 8, 24, 0);
         let poseidon_params_default = PoseidonConfig::<Fr>::new(8, 24, 31, mds, ark, 2, 1);
         let pedersen_rand_default = PedersenRandomness::<C>::default();
@@ -907,14 +894,13 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
             randomness_generator: vec![],
             generators: vec![vec![];16],        // NUM_WINDOWS=16 hardcoded
         };
-        // let pub_input_default = Fr::one();
 
         let mut cur_input = vec![];
         let mut elgamal_key_bytes = vec![];
 
         println!("logging1");
         /* Check h_i hashes correct Elgamal key. */
-        let computed_hash_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
+        let computed_hash_wtns = UInt8::<Fr>::new_witness_vec(
             cs.clone(),
             &{
                 let poseidon_params = self.poseidon_params.as_ref().unwrap_or(&poseidon_params_default);
@@ -930,10 +916,10 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
             },
         ).unwrap();
 
-        let h_cur_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
+        let h_cur_wtns = UInt8::<Fr>::new_witness_vec(
             cs.clone(),
             &{
-                let h_cur = self.h_cur.unwrap_or(Fr::one());            // TODO: consider serializing outside circuit and passing u8 as input
+                let h_cur = self.h_cur.unwrap_or(Fr::default());            // TODO: consider serializing outside circuit and passing u8 as input
                 let mut h_cur_vec = vec![];
                 h_cur.serialize_with_mode(&mut h_cur_vec, Compress::Yes);
                 h_cur_vec
@@ -1057,11 +1043,11 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
 
         /* Check aggregated signature */
 
-        let reconstructed_msg_wtns = UInt8::<ConstraintF<C>>::new_witness_vec(
+        let reconstructed_msg_wtns = UInt8::<Fr>::new_witness_vec(
             cs.clone(),
             &{
                 let mut h_bytes = vec![];
-                let default = Fr::one();
+                let default = Fr::default();
                 let h = self.h_cur.as_ref().unwrap_or(&default);
                 h.serialize_with_mode(&mut h_bytes, Compress::Yes);
                 let default_coords = (C::Affine::default(), C::Affine::default());
@@ -1113,9 +1099,6 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
             AllocationMode::Witness,
         ).unwrap();
 
-        // let end = start.elapsed();
-        // println!("Various variable declaration {:?}", end);
-        // let start = Instant::now();
         let schnorr_verified = SchnorrSignatureVerifyGadget::<C,GG>::verify(
             cs.clone(),
             &schnorr_param_const,
@@ -1125,10 +1108,6 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
             &mut poseidon_params_wtns,
         ).unwrap();
         println!("logging6");
-        // let end = start.elapsed();
-        // println!("Schnorr verify time {:?}", end);
-        
-        // println!("verified {:?}", schnorr_verified.value());
 
         schnorr_verified.enforce_equal(&Boolean::TRUE)?;
         

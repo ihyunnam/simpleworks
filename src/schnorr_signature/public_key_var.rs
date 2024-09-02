@@ -1,39 +1,42 @@
+use ark_serialize::CanonicalSerialize;
 use super::schnorr::PublicKey;
+// use ark_bls12_381::Fr;
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ed25519::{EdwardsAffine, EdwardsConfig, EdwardsProjective};
-use ark_ff::Field;
+use ark_ed25519::{EdwardsAffine, EdwardsConfig, EdwardsProjective, FrConfig};
+use ark_ff::{Field, Fp, MontBackend};
 use ark_r1cs_std::{bits::uint8::UInt8, prelude::*};
 use ark_relations::r1cs::{Namespace, SynthesisError};
+use ark_serialize::Compress;
 use ark_std::vec::Vec;
 use core::{borrow::Borrow, marker::PhantomData};
 use derivative::Derivative;
-
+type Fr = Fp<MontBackend<FrConfig, 4>, 4>;
 type ConstraintF<C> = <<C as CurveGroup>::BaseField as Field>::BasePrimeField;
 
 #[derive(Derivative)]
 #[derivative(
-    Debug(bound = "C: CurveGroup, GC: CurveVar<C, ConstraintF<C>>"),
-    Clone(bound = "C: CurveGroup, GC: CurveVar<C, ConstraintF<C>>")
+    Debug(bound = "C: CurveGroup"),
+    Clone(bound = "C: CurveGroup")
 )]
-pub struct PublicKeyVar<C: CurveGroup, GC: CurveVar<C, ConstraintF<C>>>
-where
-    for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
+pub struct PublicKeyVar<C: CurveGroup>
+// where
+    // for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
-    pub(crate) pub_key: GC,
+    pub(crate) pub_key: UInt8<Fr>,
     #[doc(hidden)]
     _group: PhantomData<*const C>,
 }
 
-impl<C, GC> AllocVar<PublicKey, ConstraintF<C>> for PublicKeyVar<C, GC>
+impl<C> AllocVar<PublicKey, Fr> for PublicKeyVar<C>
 where
-    // C: CurveGroup,
-    GC: CurveVar<C, ConstraintF<C>>,
-    for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
+    C: CurveGroup,
+    // GC: CurveVar<C, ConstraintF<C>>,
+    // for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
     // <C as CurveGroup>::Affine: From<ark_ec::twisted_edwards::Affine<ark_ed25519::EdwardsConfig>>
     C: CurveGroup<Affine = ark_ec::twisted_edwards::Affine<ark_ed25519::EdwardsConfig>>,
 {
     fn new_variable<T: Borrow<PublicKey>>(
-        cs: impl Into<Namespace<ConstraintF<C>>>,
+        cs: impl Into<Namespace<Fr>>,
         f: impl FnOnce() -> Result<T, SynthesisError>,
         mode: AllocationMode,
     ) -> Result<Self, SynthesisError> {
@@ -42,10 +45,13 @@ where
             // let affine_point: C::Affine = *val.borrow().into();
 
             // Convert the affine point to its projective representation
-            // let projective_point = EdwardsProjective::from(val.borrow().into());
-            let pub_key_c = C::from(*val.borrow());
-            // let pubkey_c: EdwardsProjective = EdwardsProjective(pubkey_c);
-            let pub_key = GC::new_variable_omit_prime_order_check(cs, || Ok(pub_key_c), mode)?;
+            // Note: this used to work
+            // let pub_key_c = C::from(*val.borrow());
+            let mut writer = vec![];
+            let pub_key = val.borrow().serialize_with_mode(&mut writer, Compress::Yes);
+            let writer_slice: &[u8; 32] = writer.as_slice().try_into().expect("Expected a Vec of length 32");
+            
+            let pub_key = UInt8::<Fr>::new_variable(cs, || Ok(water_slice), mode).unwrap();
             Ok(Self {
                 pub_key,
                 _group: PhantomData,
@@ -54,14 +60,14 @@ where
     }
 }
 
-impl<C, GC> EqGadget<ConstraintF<C>> for PublicKeyVar<C, GC>
+impl<C> EqGadget<Fr> for PublicKeyVar<C>
 where
     C: CurveGroup,
-    GC: CurveVar<C, ConstraintF<C>>,
-    for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
+    // GC: CurveVar<C, ConstraintF<C>>,
+    // for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
     #[inline]
-    fn is_eq(&self, other: &Self) -> Result<Boolean<ConstraintF<C>>, SynthesisError> {
+    fn is_eq(&self, other: &Self) -> Result<Boolean<Fr>, SynthesisError> {
         self.pub_key.is_eq(&other.pub_key)
     }
 
@@ -69,7 +75,7 @@ where
     fn conditional_enforce_equal(
         &self,
         other: &Self,
-        condition: &Boolean<ConstraintF<C>>,
+        condition: &Boolean<Fr>,
     ) -> Result<(), SynthesisError> {
         self.pub_key
             .conditional_enforce_equal(&other.pub_key, condition)
@@ -79,20 +85,20 @@ where
     fn conditional_enforce_not_equal(
         &self,
         other: &Self,
-        condition: &Boolean<ConstraintF<C>>,
+        condition: &Boolean<Fr>,
     ) -> Result<(), SynthesisError> {
         self.pub_key
             .conditional_enforce_not_equal(&other.pub_key, condition)
     }
 }
 
-impl<C, GC> ToBytesGadget<ConstraintF<C>> for PublicKeyVar<C, GC>
+impl<C> ToBytesGadget<Fr> for PublicKeyVar<C>
 where
     C: CurveGroup,
-    GC: CurveVar<C, ConstraintF<C>>,
-    for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
+    // GC: CurveVar<C, ConstraintF<C>>,
+    // for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
-    fn to_bytes(&self) -> Result<Vec<UInt8<ConstraintF<C>>>, SynthesisError> {
+    fn to_bytes(&self) -> Result<Vec<UInt8<Fr>>, SynthesisError> {
         self.pub_key.to_bytes()
     }
 }
