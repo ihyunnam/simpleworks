@@ -103,7 +103,7 @@ where
 
         let poseidon_params = &poseidon_params.parameters;
 
-        let pubkey_u8 = public_key.pub_key.value().unwrap_or(0);
+        let pubkey_u8 = public_key.pub_key.value().unwrap_or(vec![0u8;32]);
 
         let message = message.value().unwrap_or(vec![0u8;96]);
         
@@ -115,7 +115,7 @@ where
         let hash1 = CRH::<Fr>::evaluate(poseidon_params, [final_nonce_xonly]).unwrap();
         
         // pubkey_affine.serialize_with_mode(&mut input_vector, Compress::Yes);
-        let aggregated_pubkey = MaybeScalar::from_be_bytes_mod_order(&[pubkey_u8]);
+        let aggregated_pubkey = MaybeScalar::from_be_bytes_mod_order(&pubkey_u8);
         input_vector.clear();
         let hash2 = CRH::<Fr>::evaluate(poseidon_params, [aggregated_pubkey]).unwrap();
 
@@ -135,19 +135,22 @@ where
         final_vector.extend(&temp_vector);
         temp_vector.clear();
 
-        let prover_response_vec = prover_response.value().unwrap_or(vec![0u8;32]);
-        // let mut reader = Cursor::new(prover_response.value().unwrap_or([0u8;32].to_vec()));
-        // let prover_response_fe = C::ScalarField::deserialize_with_mode(&mut reader, Compress::Yes, Validate::No).unwrap();
+        let prover_response_vec: Vec<u8> = prover_response.value().unwrap_or(vec![0u8;32]);
+        let mut reader = Cursor::new(prover_response.value().unwrap_or([0u8;32].to_vec()));
+        let prover_response_fe = C::ScalarField::deserialize_with_mode(&mut reader, Compress::Yes, Validate::No).unwrap();
 
-        // let e = C::ScalarField::from_be_bytes_mod_order(final_vector.as_slice()); 
+        let e = C::ScalarField::from_be_bytes_mod_order(final_vector.as_slice()); 
+        let default_vec = vec![0u8;32];
+        let pubkey_val = public_key.pub_key.value().unwrap_or(default_vec);
+        let pubkey = C::Affine::from_base_prime_field_elems(pubkey_val);
 
-        let e = final_vector.iter().map(|&x| x.wrapping_mul(public_key.pub_key.value().unwrap_or(0))).collect();
-        // let e = public_key.pub_key.value().unwrap_or(0).mul(e);
-        let vec = prover_response_vec.iter().map(|&x| x.wrapping_mul(parameters.generator.value().unwrap_or(0))).collect();
-        // let verification_point = prover_response.value().unwrap_or([0u8;32]).mul(parameters.generator.value().unwrap_or(0)).sub(public_key.pub_key.value().unwrap_or(UInt8::<Fr>::constant(0)).mul(e));
-        let verification_point = vec.sub(e);
+        // let e: Vec<u8> = final_vector.iter().map(|&x| x.wrapping_mul(public_key.pub_key.value().unwrap_or(0))).collect();
+        // let e = public_key.pub_key.value().unwrap_or(default_vec).mul(e);
+        // let vec: Vec<u8> = prover_response_vec.iter().map(|&x| x.wrapping_mul(parameters.generator.value().unwrap_or(0))).collect();
+        let verification_point = prover_response.value().unwrap_or(vec![0u8;32]).mul(parameters.generator.value().unwrap_or(0)).sub(public_key.pub_key.value().unwrap_or(vec![0u8;32]).mul(e));
+        // let verification_point = vec.sub(e);
         // let mut verification_point_bytes: Vec<u8> = vec![];
-        // verification_point.serialize_with_mode(&mut temp_vector, Compress::Yes);            // Reuse temp_vector to minimize alloc
+        verification_point.serialize_with_mode(&mut temp_vector, Compress::Yes);            // Reuse temp_vector to minimize alloc
 
         let mut verification_point_wtns: Vec<UInt8<Fr>> = vec![];
         for coord in verification_point {

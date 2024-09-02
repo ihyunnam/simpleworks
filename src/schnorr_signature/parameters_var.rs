@@ -21,7 +21,7 @@ pub struct ParametersVar<C: CurveGroup>
 // where
 //     for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
-    pub(crate) generator: UInt8<Fr>,
+pub(crate) generator: Vec<UInt8<Fr>>,
     pub(crate) salt: Option<Vec<UInt8<Fr>>>,
     _curve: PhantomData<C>,
 }
@@ -47,10 +47,18 @@ where
             val.borrow().generator.serialize_with_mode(&mut writer, Compress::Yes).unwrap();
 
             // Convert Vec<u8> to a fixed-size array
-            let writer_slice: &[u8; 32] = writer.as_slice().try_into().expect("Expected a Vec of length 32");
+            // let writer_slice: &[u8; 32] = writer.as_slice().try_into().expect("Expected a Vec of length 32");
 
             // Use the array with `new_constant`
-            let generator = UInt8::<Fr>::new_variable(cs.clone(), || Ok(writer), mode)?;
+            // let generator = UInt8::<Fr>::new_variable(cs.clone(), || Ok(writer), mode)?;
+            let mut generator = vec![];
+            for byte in &writer {
+                generator.push(UInt8::<Fr>::new_variable(
+                    cs.clone(),
+                    || Ok(byte),
+                    mode,
+                )?);
+            }
 
             let native_salt = val.borrow().salt;
             let mut constraint_salt = Vec::<UInt8<Fr>>::new();

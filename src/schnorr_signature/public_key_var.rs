@@ -22,7 +22,7 @@ pub struct PublicKeyVar<C: CurveGroup>
 // where
     // for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
 {
-    pub(crate) pub_key: UInt8<Fr>,
+    pub(crate) pub_key: Vec<UInt8<Fr>>,
     #[doc(hidden)]
     _group: PhantomData<*const C>,
 }
@@ -47,11 +47,19 @@ where
             // Convert the affine point to its projective representation
             // Note: this used to work
             // let pub_key_c = C::from(*val.borrow());
-            let mut writer = vec![];
-            let pub_key = val.borrow().serialize_with_mode(&mut writer, Compress::Yes);
-            let writer_slice: &[u8; 32] = writer.as_slice().try_into().expect("Expected a Vec of length 32");
-            
-            let pub_key = UInt8::<Fr>::new_variable(cs, || Ok(water_slice), mode).unwrap();
+            let mut writer: Vec<u8> = vec![];
+            val.borrow().serialize_with_mode(&mut writer, Compress::Yes);
+            // let writer_slice: &[u8; 32] = writer.as_slice().try_into().expect("Expected a Vec of length 32");
+            let mut pub_key = vec![];
+            for byte in &writer {
+                pub_key.push(UInt8::<Fr>::new_variable(
+                    cs.clone(),
+                    || Ok(byte),
+                    mode,
+                )?);
+            }
+
+            // let pub_key: UInt8<Fp<MontBackend<FrConfig, 4>, 4>> = UInt8::<Fr>::new_variable(cs.clone(), || Ok(writer.to_vec()), mode).unwrap();
             Ok(Self {
                 pub_key,
                 _group: PhantomData,
