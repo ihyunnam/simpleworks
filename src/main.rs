@@ -292,11 +292,12 @@ fn main() {
     let mut verify_time_total = Duration::default();
     for i in 0..10 {
         println!("InsertCircuit iteration {:?}", i);
-        let cs: ConstraintSystemRef<Fr> = ConstraintSystem::new_ref();
+        let cs: ConstraintSystemRef<Fp<MontBackend<FrConfig, 4>, 4>> = ConstraintSystem::new_ref();
         let (circuit, _) = generate_insert_circuit();
         cs.set_mode(SynthesisMode::Prove{construct_matrices: true});
         circuit.generate_constraints(cs.clone());
-        let matrices: ConstraintMatrices<Fr> = cs.to_matrices().unwrap();
+        
+        let matrices: ConstraintMatrices<Fp<MontBackend<FrConfig, 4>, 4>> = cs.to_matrices().unwrap();
         let num_cons = cs.num_constraints();
         let num_vars = cs.num_witness_variables();
         let num_inputs = cs.num_instance_variables();
@@ -305,10 +306,11 @@ fn main() {
         let a_flat = flatten_vec_vec(matrices.a);
         let b_flat = flatten_vec_vec(matrices.b);
         let c_flat = flatten_vec_vec(matrices.c);
-        
-        let instance_assignment = cs.clone().into_inner().unwrap().instance_assignment;     // TODO: CLONE EXPENSIVE
+
+        let cs_inner = cs.into_inner().unwrap();
+        let instance_assignment = cs_inner.instance_assignment;    // TODO: CLONE EXPENSIVE
         let instance_assignment_var = Assignment::<Fr>::new(&instance_assignment).unwrap();
-        let witness_assignment = cs.into_inner().unwrap().witness_assignment;
+        let witness_assignment = cs_inner.witness_assignment;
         let witness_assignment_var = Assignment::<Fr>::new(&witness_assignment).unwrap();
         
         let gens = NIZKGens::<C>::new(num_cons, num_vars, num_inputs);
@@ -319,14 +321,14 @@ fn main() {
         // and it's correct but vscode is not seeing it
         let mut prover_transcript = Transcript::new(b"nizk_example");
         let start = Instant::now();
-        let proof = NIZK::<C>::prove(&inst, instance_assignment_var, &witness_assignment_var, &gens, &mut prover_transcript);
+        let proof = NIZK::<C>::prove(&inst, instance_assignment_var.clone(), &witness_assignment_var, &gens, &mut prover_transcript);
         proof_time_total += start.elapsed();
 
         // verify the proof of satisfiability
         let mut verifier_transcript = Transcript::new(b"nizk_example");
         let start = Instant::now();
         let verified = proof
-        .verify(&inst, &witness_assignment_var, &mut verifier_transcript, &gens)
+        .verify(&inst, &instance_assignment_var, &mut verifier_transcript, &gens)
         .is_ok();
         verify_time_total += start.elapsed();
         println!("verify result: {:?}", verified);
@@ -395,7 +397,7 @@ fn main() {
     println!("LoggingCircuit Verify time: {:?}", verify_time_total.as_millis()/10);
 }
 
-fn generate_insert_circuit() -> (InsertCircuit<W,C,GG>, PublicKey) {
+fn generate_insert_circuit() -> (InsertCircuit<W,C>, PublicKey) {
     println!("Generating InsertCircuit");
     let rng = &mut OsRng;
     
@@ -409,7 +411,7 @@ fn generate_insert_circuit() -> (InsertCircuit<W,C,GG>, PublicKey) {
     println!("here4");
     /* Generate Poseidon hash parameters for both Schnorr signature (Musig2) and v_i */      // 6, 5, 8, 57, 0
     
-    let (ark, mds) = find_poseidon_ark_and_mds::<Fr> (255, 2, 8, 24, 0);        // ark_bn254::FrParameters::MODULUS_BITS = 255
+    let (ark, mds) = find_poseidon_ark_and_mds::<Fr> (253, 2, 8, 24, 0);        // ark_bn254::FrParameters::MODULUS_BITS = 255
     let poseidon_params = PoseidonConfig::<Fr>::new(8, 24, 31, mds, ark, 2, 1);
 
     println!("here5");
@@ -461,8 +463,8 @@ fn generate_insert_circuit() -> (InsertCircuit<W,C,GG>, PublicKey) {
     println!("here1");
     /* AGGREGATE SCHNORR ATTEMPT - WORKS!! */
 
-    let schnorr_param = SchnorrParameters {
-        generator: <ark_ec::twisted_edwards::Projective<EdwardsConfig> as CurveGroup>::Affine::default(),
+    let schnorr_param: SchnorrParameters = SchnorrParameters {
+        generator: EdwardsAffine::generator(),
         salt: Some([0u8; 32]),
     };
     
@@ -559,7 +561,7 @@ fn generate_insert_circuit() -> (InsertCircuit<W,C,GG>, PublicKey) {
     //     _window_var: PhantomData::<W>,
     // };
 
-    let insert_circuit = InsertCircuit::<W,C,GG> {
+    let insert_circuit = InsertCircuit::<W,C> {
         first_login: None,
         schnorr_params: Some(schnorr_param),
         schnorr_apk: Some(aggregated_pubkey),
@@ -574,15 +576,15 @@ fn generate_insert_circuit() -> (InsertCircuit<W,C,GG>, PublicKey) {
         elgamal_key: Some(elgamal_key),
         h_cur: Some(h_cur),
         i: Some(i),
-        _curve_var: PhantomData::<GG>,
+        // _curve_var: PhantomData::<GG>,
         _window_var: PhantomData::<W>,
     };
 
     (insert_circuit, aggregated_pubkey)
 }
 
-fn generate_insert_circuit_for_setup() -> InsertCircuit<W,C,GG> {
-        InsertCircuit::<W, C, GG> {
+fn generate_insert_circuit_for_setup() -> InsertCircuit<W,C> {
+        InsertCircuit::<W, C> {
         first_login: None,
         schnorr_params: None,
         schnorr_apk: None,
@@ -593,7 +595,7 @@ fn generate_insert_circuit_for_setup() -> InsertCircuit<W,C,GG> {
         elgamal_key: None,
         h_cur: None,
         i: Some(0),     // value doesn't mater but needs to be populated 
-        _curve_var: PhantomData::<GG>,
+        // _curve_var: PhantomData::<GG>,
         _window_var: PhantomData::<W>,
     }
 }
@@ -626,19 +628,19 @@ fn generate_logging_circuit_for_setup() -> LoggingCircuit::<W, C, GG> {
 
 // type C::Affine = ark_ec::twisted_edwards::Affine::<EdwardsConfig>;
 
-impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where 
+impl<W, C> ConstraintSynthesizer<Fr> for InsertCircuit<W, C> where 
     W: ark_crypto_primitives::crh::pedersen::Window,
-    ConstraintF<C>: PrimeField,
+    // ConstraintF<C>: PrimeField,
     C: CurveGroup,
     // GG: CurveVar,
-    for<'a> &'a GG: ark_r1cs_std::groups::GroupOpsBounds<'a, C, GG>,
-    Namespace<<<C as CurveGroup>::BaseField as Field>::BasePrimeField>: From<ConstraintSystemRef<Fr>>,
+    // for<'a> &'a GG: ark_r1cs_std::groups::GroupOpsBounds<'a, C, GG>,
+    // Namespace<<<C as CurveGroup>::BaseField as Field>::BasePrimeField>: From<ConstraintSystemRef<Fr>>,
     C: CurveGroup<Affine = ark_ec::twisted_edwards::Affine<ark_ed25519::EdwardsConfig>>,
     <C as CurveGroup>::BaseField: PrimeField,
     <C as CurveGroup>::BaseField: ark_crypto_primitives::sponge::Absorb,
 {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
-        let default_affine = ark_ec::twisted_edwards::Affine::<EdwardsConfig>::default();
+        let default_affine = EdwardsAffine::default();
         let h_default = Fr::default();      // This is ConstraintF<C>
         let sig_default = Signature::default();
         // let pubkey_default = PublicKey::default();
@@ -710,7 +712,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
 
         /* SCHNORR SIG VERIFY GADGET */
 
-        let (ark, mds) = find_poseidon_ark_and_mds::<Fr> (255, 2, 8, 24, 0);
+        let (ark, mds) = find_poseidon_ark_and_mds::<Fr> (253, 2, 8, 24, 0);
         let poseidon_params_default = PoseidonConfig::<Fr>::new(8, 24, 31, mds, ark, 2, 1);
         
         let mut poseidon_params_wtns = CRHParametersVar::<Fr>::new_variable(
@@ -719,20 +721,20 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
             AllocationMode::Witness,
         )?;
 
-        let schnorr_apk_input = PublicKeyVar::<C, GG>::new_variable(
+        let schnorr_apk_input = PublicKeyVar::<C>::new_variable(
             cs.clone(),
             || Ok(self.schnorr_apk.ok_or(SynthesisError::AssignmentMissing)?),
             AllocationMode::Input,          // NOTE: this should be witness when RP is verifying circuit
         ).unwrap();
 
-        let schnorr_sig_wtns = SignatureVar::<C, GG>::new_variable(
+        let schnorr_sig_wtns = SignatureVar::<C>::new_variable(
             cs.clone(),
             || Ok(self.schnorr_sig.as_ref().unwrap_or(&sig_default)),
             AllocationMode::Witness,
         ).unwrap();
 
         let start = Instant::now();
-        let schnorr_verified = SchnorrSignatureVerifyGadget::<C,GG>::verify(
+        let schnorr_verified = SchnorrSignatureVerifyGadget::<C>::verify(
             cs.clone(),
             &schnorr_param_const,
             &schnorr_apk_input,
@@ -830,7 +832,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for InsertCircuit<W, C, GG> where
     }
 }
 
-pub struct InsertCircuit<W, C: CurveGroup, GG: CurveVar<C, ConstraintF<C>>> {
+pub struct InsertCircuit<W, C: CurveGroup> {
     pub first_login: Option<bool>,
     pub schnorr_params: Option<SchnorrParameters>,
     pub schnorr_apk: Option<C::Affine>,
@@ -841,7 +843,7 @@ pub struct InsertCircuit<W, C: CurveGroup, GG: CurveVar<C, ConstraintF<C>>> {
     pub elgamal_key: Option<PublicKey>,  
     pub h_cur: Option<Fr>,
     pub i: Option<u8>,
-    pub _curve_var: PhantomData<GG>,
+    // pub _curve_var: PhantomData<GG>,
     pub _window_var: PhantomData<W>,
 }
 
@@ -1005,9 +1007,9 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
         ).unwrap();
 
         /* Check encryption of correct context (using correct Elgamal key) */
-        let default_rand = EncRand::<C>(C::ScalarField::one());
+        // let default_rand = EncRand::<C>(C::ScalarField::one());
         // let default_param = EncParams::<C>{generator: C::Affine::default()};
-        let default_param = EncParams::<C>{ generator: C::Affine::default() };
+        // let default_param = EncParams::<C>{ generator: C::Affine::default() };
         let reconstructed_v_cur_wtns = ElgamalCiphertextVar::<C,GG>::new_variable (
             cs.clone(),
             || {
@@ -1071,7 +1073,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
         // let start = Instant::now();
         
         println!("logging5");
-        let schnorr_param_const = ParametersVar::<C,GG>::new_variable(
+        let schnorr_param_const = ParametersVar::<C>::new_variable(
             cs.clone(),
             || Ok(self.schnorr_params.as_ref().unwrap_or(&schnorr_param_default)),
             AllocationMode::Constant,
@@ -1087,19 +1089,19 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
             AllocationMode::Witness,
         )?;
 
-        let schnorr_apk_input = PublicKeyVar::<C,GG>::new_variable(
+        let schnorr_apk_input = PublicKeyVar::<C>::new_variable(
             cs.clone(),
             || Ok(self.schnorr_apk.as_ref().unwrap_or(&affine_default)),
             AllocationMode::Input,          // NOTE: this should be witness when RP is verifying circuit
         ).unwrap();
 
-        let schnorr_sig_wtns = SignatureVar::<C, GG>::new_variable(
+        let schnorr_sig_wtns = SignatureVar::<C>::new_variable(
             cs.clone(),
             || Ok(self.schnorr_sig.as_ref().unwrap_or(&sig_default)),
             AllocationMode::Witness,
         ).unwrap();
 
-        let schnorr_verified = SchnorrSignatureVerifyGadget::<C,GG>::verify(
+        let schnorr_verified = SchnorrSignatureVerifyGadget::<C>::verify(
             cs.clone(),
             &schnorr_param_const,
             &schnorr_apk_input,

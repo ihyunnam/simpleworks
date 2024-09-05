@@ -107,16 +107,16 @@ where
 
         let message = message.value().unwrap_or(vec![0u8;96]);
         
-        let mut input_vector = vec![];
+        // let mut input_vector = vec![];
 
         // final_nonce_xonly.serialize_with_mode(&mut input_vector, Compress::Yes);
         let final_nonce_xonly = MaybeScalar::from_be_bytes_mod_order(&verifier_challenge);
-        input_vector.clear();
+        // input_vector.clear();
         let hash1 = CRH::<Fr>::evaluate(poseidon_params, [final_nonce_xonly]).unwrap();
         
         // pubkey_affine.serialize_with_mode(&mut input_vector, Compress::Yes);
         let aggregated_pubkey = MaybeScalar::from_be_bytes_mod_order(&pubkey_u8);
-        input_vector.clear();
+        // input_vector.clear();
         let hash2 = CRH::<Fr>::evaluate(poseidon_params, [aggregated_pubkey]).unwrap();
 
         // message.serialize_with_mode(&mut input_vector, Compress::Yes);
@@ -135,25 +135,29 @@ where
         final_vector.extend(&temp_vector);
         temp_vector.clear();
 
-        let prover_response_vec: Vec<u8> = prover_response.value().unwrap_or(vec![0u8;32]);
+        // let prover_response_vec: Vec<u8> = prover_response.value().unwrap_or(vec![0u8;32]);
         let mut reader = Cursor::new(prover_response.value().unwrap_or([0u8;32].to_vec()));
         let prover_response_fe = C::ScalarField::deserialize_with_mode(&mut reader, Compress::Yes, Validate::No).unwrap();
 
-        let e = C::ScalarField::from_be_bytes_mod_order(final_vector.as_slice()); 
-        let default_vec = vec![0u8;32];
-        let pubkey_val = public_key.pub_key.value().unwrap_or(default_vec);
-        let pubkey = C::Affine::from_base_prime_field_elems(pubkey_val);
+        let e = C::ScalarField::from_be_bytes_mod_order(final_vector.as_slice());
 
-        // let e: Vec<u8> = final_vector.iter().map(|&x| x.wrapping_mul(public_key.pub_key.value().unwrap_or(0))).collect();
-        // let e = public_key.pub_key.value().unwrap_or(default_vec).mul(e);
-        // let vec: Vec<u8> = prover_response_vec.iter().map(|&x| x.wrapping_mul(parameters.generator.value().unwrap_or(0))).collect();
-        let verification_point = prover_response.value().unwrap_or(vec![0u8;32]).mul(parameters.generator.value().unwrap_or(0)).sub(public_key.pub_key.value().unwrap_or(vec![0u8;32]).mul(e));
-        // let verification_point = vec.sub(e);
-        // let mut verification_point_bytes: Vec<u8> = vec![];
+        // let default_vec = vec![0u8;32];
+        // let pubkey_val = public_key.pub_key.value().unwrap_or(default_vec);
+        // let pubkey = C::Affine::from_base_prime_field_elems(pubkey_val);
+
+        // let verification_point = parameters.generator.value().unwrap_or(C::default()).into_affine().mul(prover_response_fe).sub(public_key.pub_key.value().unwrap_or(C::default()).into_affine().mul(e)).into_affine();
+
+        
+        let mut generator =  Cursor::new(parameters.generator.value().unwrap_or(vec![0u8;32]));
+        let generator_fe = C::Affine::deserialize_with_mode(&mut generator, Compress::Yes, Validate::Yes).unwrap();
+        let mut pubkey =  Cursor::new(public_key.pub_key.value().unwrap_or(vec![0u8;32]));
+        let pubkey_fe = C::Affine::deserialize_with_mode(&mut pubkey, Compress::Yes, Validate::Yes).unwrap();
+        let verification_point = generator_fe.mul(prover_response_fe).sub(pubkey_fe.mul(e));
+
         verification_point.serialize_with_mode(&mut temp_vector, Compress::Yes);            // Reuse temp_vector to minimize alloc
-
+        // TODO: wasteful to convert from C to Uint and back to C?
         let mut verification_point_wtns: Vec<UInt8<Fr>> = vec![];
-        for coord in verification_point {
+        for coord in temp_vector {
             verification_point_wtns.push(UInt8::new_variable(cs.clone(), || Ok(coord), AllocationMode::Witness).unwrap());
         }
         

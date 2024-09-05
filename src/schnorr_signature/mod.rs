@@ -38,9 +38,9 @@ pub type SimpleSchnorrPublicKey = PublicKey;
 pub type SimpleSchnorrSignature = Signature<EdwardsProjective>;
 pub type SimpleSchnorrMessage = Vec<u8>;
 
-pub type SimpleSchnorrParametersVar = ParametersVar<EdwardsProjective, EdwardsVar>;
-pub type SimpleSchnorrPublicKeyVar = PublicKeyVar<EdwardsProjective, EdwardsVar>;
-pub type SimpleSchnorrSignatureVar = SignatureVar<EdwardsProjective, EdwardsVar>;
+pub type SimpleSchnorrParametersVar = ParametersVar<EdwardsProjective>;
+pub type SimpleSchnorrPublicKeyVar = PublicKeyVar<EdwardsProjective>;
+pub type SimpleSchnorrSignatureVar = SignatureVar<EdwardsProjective>;
 
 pub type SimpleSchnorr = Schnorr<EdwardsProjective>;
 

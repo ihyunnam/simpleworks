@@ -57,18 +57,17 @@ type Fr = <EdwardsConfig as CurveConfig>::ScalarField;      // same as MaybeScal
 #[derivative(Clone, Debug)]
 pub struct Parameters {
     // pub generator: <ark_ec::twisted_edwards::Projective<ark_ed25519::EdwardsConfig> as CurveGroup>::Affine,
-    pub generator: <EdwardsProjective as CurveGroup>::Affine,
+    pub generator: EdwardsAffine,
     pub salt: Option<[u8; 32]>,
 }
 
 // type W = Window;
 type C = EdwardsProjective; 
 // type GG = EdwardsVar;
-type ConstraintF<C> = <<C as CurveGroup>::BaseField as Field>::BasePrimeField;
+// type ConstraintF<C> = <<C as CurveGroup>::BaseField as Field>::BasePrimeField;
 // type P = PoseidonRoundParams<ConstraintF<C>>;
 // type MyEnc = ElGamal<JubJub>;
-pub type PublicKey = <ark_ec::twisted_edwards::Projective<ark_ed25519::EdwardsConfig> as CurveGroup>::Affine;
-
+pub type PublicKey = EdwardsAffine;
 
 /* ADDED BY ME FOR MUSIG2. */
 pub type Point = EdwardsAffine;
@@ -106,7 +105,7 @@ where
 
     fn setup<R: Rng>(_rng: &mut R) -> Result<Self::Parameters, Error> {
         let salt = None;
-        let generator = <ark_ec::twisted_edwards::Projective<ark_ed25519::EdwardsConfig> as CurveGroup>::Affine::generator();
+        let generator = EdwardsAffine::generator();
 
         Ok(Parameters { generator, salt })
     }
@@ -394,7 +393,7 @@ impl KeyAggContext {
                 .unzip();
 
         // let aggregated_pubkey = MaybePoint::sum(&effective_pubkeys);
-        let aggregated_pubkey: Affine<EdwardsConfig> = effective_pubkeys.clone().into_iter().fold(Point::default(), |acc: Point, item: Point| (acc + &item).into());  // NOTE: added into() last 
+        let aggregated_pubkey: EdwardsAffine = effective_pubkeys.clone().into_iter().fold(Point::default(), |acc: Point, item: Point| (acc + &item).into());  // NOTE: added into() last 
 
         // NOTE: ORIGINAL IMPLEMENTATION JUST 'FILTERS OUT' POINTS AT INFINITY BEFORE SUMMING
         let pubkey_indexes = HashMap::from_iter(
@@ -412,7 +411,7 @@ impl KeyAggContext {
             key_coefficients,
             effective_pubkeys,
             parity_acc: subtle::Choice::from(0),
-            tweak_acc: MaybeScalar::zero(),     // TODO: check what this does later
+            tweak_acc: MaybeScalar::zero(),
         })
     }
 
@@ -743,14 +742,14 @@ impl<T: Clone + Eq> Slots<T> {
         Ok(())
     }
 
-    /// Returns the full array of slot values in order.
-    /// Returns `None` if any slot is not yet filled.
-    fn finalize(self) -> Result<Vec<T>, RoundFinalizeError> {
-        self.slots
-            .into_iter()
-            .map(|opt| opt.ok_or(RoundFinalizeError::Incomplete))
-            .collect()
-    }
+    // Returns the full array of slot values in order.
+    // Returns `None` if any slot is not yet filled.
+    // fn finalize(self) -> Result<Vec<T>, RoundFinalizeError> {
+    //     self.slots
+    //         .into_iter()
+    //         .map(|opt| opt.ok_or(RoundFinalizeError::Incomplete))
+    //         .collect()
+    // }
 }
 
 // #[derive(Debug, Eq, PartialEq, Clone, Hash, Ord, PartialOrd)]
@@ -1124,7 +1123,7 @@ impl AggNonce {
     //     P: From<Point>,
     {
         let nonce_coeff: MaybeScalar = nonce_coeff.into();
-        let aggnonce_sum: Affine<EdwardsConfig> = (self.R1 + (self.R2.mul(nonce_coeff).into_affine())).into_affine();
+        let aggnonce_sum: EdwardsAffine = (self.R1 + (self.R2.mul(nonce_coeff).into_affine())).into_affine();
         // P::from(match aggnonce_sum {
         //     MaybePoint::Infinity => Point::generator(),
         //     MaybePoint::Valid(p) => p,
@@ -1187,10 +1186,12 @@ pub fn sign_partial_adaptor<T: From<PartialSignature>>(
     // }
     // println!("D SUPPOSED TO BE SAME {:?}", d);
     // let nonce_x_bytes = adapted_nonce.serialize_xonly();
-    let mut nonce_x_bytes = vec![];     // TODO: INEFFICIENT (also look into affine addition - inefficient)
-    final_nonce.serialize_with_mode(&mut nonce_x_bytes, Compress::Yes);
-    let mut array = [0u8; 32];
-    array.copy_from_slice(&nonce_x_bytes[..32]);
+
+    // let mut nonce_x_bytes = vec![];     // TODO: INEFFICIENT (also look into affine addition - inefficient)
+    // final_nonce.serialize_with_mode(&mut nonce_x_bytes, Compress::Yes);
+    // let mut array = [0u8; 32];
+    // array.copy_from_slice(&nonce_x_bytes[..32]);
+
     // NOTE: changed array to final_nonce
     let e: MaybeScalar = compute_challenge_hash_tweak(&final_nonce, &aggregated_pubkey, &message, poseidon_params);
 
@@ -1242,16 +1243,16 @@ where
     // [ark_ff::Fp<MontBackend<ark_ed25519::FrConfig, 4>, 4>; 1]: Borrow<[<<C as CurveGroup>::BaseField as ark_ff::Field>::BasePrimeField]>,
     // C: CurveGroup,
     {
-    let mut input_vector = vec![];
+    let mut temp_vector = vec![];
 
-    final_nonce_xonly.serialize_with_mode(&mut input_vector, Compress::Yes);
-    let final_nonce_xonly = MaybeScalar::from_be_bytes_mod_order(&input_vector);
-    input_vector.clear();
+    final_nonce_xonly.serialize_with_mode(&mut temp_vector, Compress::Yes);
+    let final_nonce_xonly = MaybeScalar::from_be_bytes_mod_order(&temp_vector);
+    temp_vector.clear();
     let hash1 = CRH::<Fr>::evaluate(poseidon_params, [final_nonce_xonly]).unwrap();
     
-    aggregated_pubkey.serialize_with_mode(&mut input_vector, Compress::Yes);
-    let aggregated_pubkey = MaybeScalar::from_be_bytes_mod_order(&input_vector);
-    input_vector.clear();
+    aggregated_pubkey.serialize_with_mode(&mut temp_vector, Compress::Yes);
+    let aggregated_pubkey = MaybeScalar::from_be_bytes_mod_order(&temp_vector);
+    temp_vector.clear();
     let hash2 = CRH::<Fr>::evaluate(poseidon_params, [aggregated_pubkey]).unwrap();
 
     // message.serialize_with_mode(&mut input_vector, Compress::Yes);
@@ -1259,7 +1260,7 @@ where
     let hash3 = CRH::<Fr>::evaluate(poseidon_params, [message]).unwrap();
 
     let mut final_vector = vec![];
-    let mut temp_vector = vec![];
+    // let mut temp_vector = vec![];
     
     hash1.serialize_with_mode(&mut temp_vector, Compress::Yes).unwrap();
     final_vector.extend(&temp_vector);
@@ -1269,7 +1270,7 @@ where
     temp_vector.clear();
     hash3.serialize_with_mode(&mut temp_vector, Compress::Yes).unwrap();
     final_vector.extend(&temp_vector);
-    temp_vector.clear();
+    // temp_vector.clear();
 
     S::from(MaybeScalar::from_be_bytes_mod_order(&final_vector))
 }
@@ -1334,8 +1335,9 @@ pub fn verify_partial_adaptor(
     //     challenge_point.neg();
     // }
 
+    let generator = EdwardsAffine::generator();
     // TODO: double check G1 or G2
-    if EdwardsAffine::generator().mul(partial_signature).into_affine() != effective_nonce + challenge_point {
+    if generator.mul(partial_signature).into_affine() != effective_nonce + challenge_point {
         return Err(VerifyError::BadSignature);
     }
 
