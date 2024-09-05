@@ -643,11 +643,12 @@ impl<W, C> ConstraintSynthesizer<Fr> for InsertCircuit<W, C> where
     <C as CurveGroup>::BaseField: ark_crypto_primitives::sponge::Absorb,
 {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
+        let start = Instant::now();
         println!("num1 {:?}", cs.num_instance_variables());
         let default_affine = EdwardsAffine::default();
         let h_default = Fr::default();      // This is ConstraintF<C>
         let sig_default = Signature::default();
-        // let pubkey_default = PublicKey::default();
+        
         let schnorr_param_default: SchnorrParameters = SchnorrParameters {
             generator: default_affine,
             salt: Some([0u8;32]),
@@ -725,8 +726,10 @@ impl<W, C> ConstraintSynthesizer<Fr> for InsertCircuit<W, C> where
             AllocationMode::Witness,
         )?;
 
+        let end = start.elapsed();
+        println!("end1 {:?}", end);
         println!("num2 {:?}", cs.num_instance_variables());
-
+        let start = Instant::now();
         let schnorr_apk_input = PublicKeyVar::<C>::new_variable(
             cs.clone(),
             || Ok(self.schnorr_apk.ok_or(SynthesisError::AssignmentMissing)?),
@@ -740,7 +743,7 @@ impl<W, C> ConstraintSynthesizer<Fr> for InsertCircuit<W, C> where
             AllocationMode::Witness,
         ).unwrap();
 
-        let start = Instant::now();
+        
         let schnorr_verified = SchnorrSignatureVerifyGadget::<C>::verify(
             cs.clone(),
             &schnorr_param_const,
@@ -754,7 +757,9 @@ impl<W, C> ConstraintSynthesizer<Fr> for InsertCircuit<W, C> where
 
         // println!("enforce equal 2 {:?}", verified_select.is_eq(&Boolean::TRUE).unwrap().value());
         verified_select.enforce_equal(&Boolean::TRUE)?;
-        
+        let end = start.elapsed();
+        println!("end2 {:?}", end);
+        let start = Instant::now();
         let mut cur_input = vec![];
         let mut elgamal_key_bytes = vec![];
         let computed_hash_wtns = UInt8::<Fr>::new_witness_vec(
@@ -828,7 +833,9 @@ impl<W, C> ConstraintSynthesizer<Fr> for InsertCircuit<W, C> where
 
         println!("enforce equal 3 {:?}", computed_hash_wtns.is_eq(&h_cur_wtns).unwrap().value());
         computed_hash_wtns.enforce_equal(&h_cur_wtns);
-
+        let end = start.elapsed();
+        println!("end2 {:?}", end);
+        let start = Instant::now();
         let mut output = vec![];
         for i in 0..computed_prev_hash_wtns.len() {
             let elem = first_login_wtns.select(&h_prev_wtns[i], &computed_prev_hash_wtns[i]).unwrap_or(UInt8::<Fr>::constant(0));
@@ -837,7 +844,9 @@ impl<W, C> ConstraintSynthesizer<Fr> for InsertCircuit<W, C> where
         println!("enforce equal 4 {:?}", output.is_eq(&h_prev_wtns).unwrap().value());
         // first_login_wtns.select(&h_prev_wtns, &computed_prev_hash_wtns).unwrap();
         output.enforce_equal(&h_prev_wtns);
-
+        let end = start.elapsed();
+        println!("end2 {:?}", end);
+        
         Ok(())
     }
 }
