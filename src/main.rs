@@ -1,6 +1,6 @@
 use simpleworks::schnorr_signature::schnorr_signature_verify_gadget::SigVerifyGadget;
 use merlin::Transcript;
-use libspartan::{Assignment, Instance, NIZKGens, NIZK};
+use libspartan::{Assignment, InputsAssignment, Instance, NIZKGens, VarsAssignment, NIZK};
 // use ark_crypto_primitives_03::crh::poseidon::Poseidon;
 use ark_crypto_primitives_03::SignatureScheme;
 use ark_ec::CurveConfig;
@@ -308,10 +308,11 @@ fn main() {
         let c_flat = flatten_vec_vec(matrices.c);
 
         let cs_inner = cs.into_inner().unwrap();
-        let instance_assignment = cs_inner.instance_assignment;    // TODO: CLONE EXPENSIVE
-        let instance_assignment_var = Assignment::<Fr>::new(&instance_assignment).unwrap();
+        let instance_assignment = cs_inner.instance_assignment;
+        // println!("instance_assignment {:?}", instance_assignment.value());
+        let instance_assignment_var = InputsAssignment::<Fr>::new(&instance_assignment).unwrap();
         let witness_assignment = cs_inner.witness_assignment;
-        let witness_assignment_var = Assignment::<Fr>::new(&witness_assignment).unwrap();
+        let witness_assignment_var = VarsAssignment::<Fr>::new(&witness_assignment).unwrap();
         
         let gens = NIZKGens::<C>::new(num_cons, num_vars, num_inputs);
         // this Fq must be same as constraintsmatrices<fq> i.e. ConstraintSystemRef<Fq>
@@ -321,12 +322,14 @@ fn main() {
         // and it's correct but vscode is not seeing it
         let mut prover_transcript = Transcript::new(b"nizk_example");
         let start = Instant::now();
-        let proof = NIZK::<C>::prove(&inst, instance_assignment_var.clone(), &witness_assignment_var, &gens, &mut prover_transcript);
+        // let here = instance_assignment_var.clone();
+        let proof = NIZK::<C>::prove(&inst, witness_assignment_var, &instance_assignment_var.clone(), &gens, &mut prover_transcript);
         proof_time_total += start.elapsed();
 
         // verify the proof of satisfiability
         let mut verifier_transcript = Transcript::new(b"nizk_example");
         let start = Instant::now();
+        // println!("same? {:?}", );
         let verified = proof
         .verify(&inst, &instance_assignment_var, &mut verifier_transcript, &gens)
         .is_ok();
@@ -640,6 +643,7 @@ impl<W, C> ConstraintSynthesizer<Fr> for InsertCircuit<W, C> where
     <C as CurveGroup>::BaseField: ark_crypto_primitives::sponge::Absorb,
 {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
+        println!("num1 {:?}", cs.num_instance_variables());
         let default_affine = EdwardsAffine::default();
         let h_default = Fr::default();      // This is ConstraintF<C>
         let sig_default = Signature::default();
@@ -678,7 +682,7 @@ impl<W, C> ConstraintSynthesizer<Fr> for InsertCircuit<W, C> where
                 Ok(supposed_to_be.value().unwrap_or(u8::one()))
             }
         ).unwrap();
-
+        println!("enforce equal 1 {:?}", i_wtns.is_eq(&supposed_to_be_wtns).unwrap().value());
         i_wtns.enforce_equal(&supposed_to_be_wtns);
 
         let reconstructed_msg_wtns = UInt8::<Fr>::new_witness_vec(
@@ -721,11 +725,14 @@ impl<W, C> ConstraintSynthesizer<Fr> for InsertCircuit<W, C> where
             AllocationMode::Witness,
         )?;
 
+        println!("num2 {:?}", cs.num_instance_variables());
+
         let schnorr_apk_input = PublicKeyVar::<C>::new_variable(
             cs.clone(),
             || Ok(self.schnorr_apk.ok_or(SynthesisError::AssignmentMissing)?),
             AllocationMode::Input,          // NOTE: this should be witness when RP is verifying circuit
         ).unwrap();
+        println!("num3 {:?}", cs.num_instance_variables());
 
         let schnorr_sig_wtns = SignatureVar::<C>::new_variable(
             cs.clone(),
@@ -745,6 +752,7 @@ impl<W, C> ConstraintSynthesizer<Fr> for InsertCircuit<W, C> where
         
         let verified_select: Boolean<Fr> = first_login_wtns.select(&Boolean::TRUE, &schnorr_verified)?;
 
+        // println!("enforce equal 2 {:?}", verified_select.is_eq(&Boolean::TRUE).unwrap().value());
         verified_select.enforce_equal(&Boolean::TRUE)?;
         
         let mut cur_input = vec![];
@@ -818,15 +826,17 @@ impl<W, C> ConstraintSynthesizer<Fr> for InsertCircuit<W, C> where
             },
         ).unwrap();
 
+        println!("enforce equal 3 {:?}", computed_hash_wtns.is_eq(&h_cur_wtns).unwrap().value());
         computed_hash_wtns.enforce_equal(&h_cur_wtns);
 
-        let mut ouptut = vec![];
+        let mut output = vec![];
         for i in 0..computed_prev_hash_wtns.len() {
             let elem = first_login_wtns.select(&h_prev_wtns[i], &computed_prev_hash_wtns[i]).unwrap_or(UInt8::<Fr>::constant(0));
-            ouptut.push(elem);
+            output.push(elem);
         };
+        println!("enforce equal 4 {:?}", output.is_eq(&h_prev_wtns).unwrap().value());
         // first_login_wtns.select(&h_prev_wtns, &computed_prev_hash_wtns).unwrap();
-        ouptut.enforce_equal(&h_prev_wtns);
+        output.enforce_equal(&h_prev_wtns);
 
         Ok(())
     }
@@ -999,7 +1009,7 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
         // println!("time commit {:?}", end);
 
         let default_coords = (C::Affine::default(), C::Affine::default());
-        println!("C::Affine::default() {:?}", C::Affine::default());
+        // println!("C::Affine::default() {:?}", C::Affine::default());
         let v_cur_wtns = ElgamalCiphertextVar::<C,GG>::new_variable (
             cs.clone(),
             || Ok(self.v_cur.as_ref().unwrap_or(&default_coords)),
@@ -1015,8 +1025,8 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
             || {
                 let record_x = self.record_x.as_ref().unwrap();
                 let record_y = self.record_y.as_ref().unwrap();
-                println!("record x {:?}", record_x);
-                println!("record y {:?}", record_y);
+                // println!("record x {:?}", record_x);
+                // println!("record y {:?}", record_y);
                 // println!("GroupAffine::<ark_ed_on_bn254::EdwardsParameters>::new(*record_x, *record_y).into() {:?}", GroupAffine::<ark_ed_on_bn254::EdwardsParameters>::new(*record_x, *record_y));
                 // let test: GroupProjective::<ark_ed_on_bn254::EdwardsParameters> = GroupAffine::<ark_ed_on_bn254::EdwardsParameters>::new(*record_x, *record_y).into();
                 // println!("test {:?}", test);
@@ -1029,10 +1039,10 @@ impl<W, C, GG> ConstraintSynthesizer<Fr> for LoggingCircuit<W, C, GG> where
                 
                 let ciphertext: (C::Affine, C::Affine) = ElGamal::<C>::encrypt(elgamal_param_input, pubkey, &record_input, elgamal_rand).unwrap();
                 // let test1: (GroupAffine::<EdwardsParameters>, GroupAffine::<EdwardsParameters>) = ciphertext.into();
-                println!("default affine {:?}", C::Affine::default());
+                // println!("default affine {:?}", C::Affine::default());
                 println!("logging3-2");
-                println!("ciphertext.0 {:?}", ciphertext.0);
-                println!("ciphertext.1 {:?}", ciphertext.1);
+                // println!("ciphertext.0 {:?}", ciphertext.0);
+                // println!("ciphertext.1 {:?}", ciphertext.1);
                 // let test: GroupProjective::<ark_ed_on_bn254::EdwardsParameters> = GroupAffine::<ark_ed_on_bn254::EdwardsParameters>::new(ciphertext.0, ciphertext.0).into();
                 // println!("test {:?}", test);
                 Ok((ciphertext.0, ciphertext.1))
