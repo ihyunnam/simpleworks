@@ -4,7 +4,7 @@ use std::{borrow::Borrow, ops::{Add, Mul, Sub}};
 // use subtle::ConstantTimeEq as _;
 use ark_serialize::CanonicalSerialize;
 // use serde::Serialize;
-use ark_ed25519::{EdwardsAffine, EdwardsProjective, EdwardsConfig};
+use ark_ed_on_bn254::{EdwardsAffine, EdwardsProjective, EdwardsConfig};
 use ark_ec::{
     twisted_edwards::{Affine, Projective}, AffineRepr, CurveConfig, CurveGroup
 };
