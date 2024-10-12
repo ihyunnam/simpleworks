@@ -12,33 +12,28 @@ debug-assertions = true
 
 [dependencies]
 # Arkworks dependencies
-ark-ed-on-bls12-381 = { version = "^0.3.0", default-features = false, features = ["r1cs"] }
-ark-ff = { version = "^0.3.0", default-features = false }
-#ark-ff-04 = { package = "ark-ff", version = "0.4.0", default-features = false}
-ark-ec = { version = "^0.3.0", default-features = false }
-ark-ed-on-bls12-377 = { version = "^0.3.0", features = ["r1cs"] }
-ark-bls12-377 = { version = "^0.3.0", default-features = false, features = ["curve"] }
-ark-ed-on-bn254 = { version = "^0.3.0", features = ["r1cs"] }
-ark-bn254 = { version = "^0.3.0", default-features = false, features = ["curve"] }
-ark-std = { version = "^0.3.0", default-features = false }
-ark-relations = { version = "^0.3.0", default-features = false  }
-ark-poly = { version = "^0.3.0", default-features = false  }
-ark-poly-commit = { version = "^0.3.0", default-features = false  }
-ark-r1cs-std = { version = "^0.3.0", default-features = false }
-ark-snark = { version = "^0.3.0", default-features = false }
-ark-serialize = { version = "^0.3.0", default-features = false }
-#ark-crypto-primitives = { version = "^0.3.0", default-features = true, features = [ "r1cs" ] }
-ark-crypto-primitives = { git = "https://github.com/ihyunnam/fork-ark-crypto-primitives-0.3.0.git", rev = "f34bfa0", default-features = false, features = ["r1cs"] }
+ark-ff = { version = "^0.4.0", default-features = false }
+ark-ec = { version = "^0.4.0", default-features = false }
+ark-ed-on-bn254 = { version = "^0.4.0", features = ["r1cs"] }
+ark-bn254 = { version = "^0.4.0", default-features = false, features = ["curve"] }
+ark-std = { version = "^0.4.0", default-features = false }
+ark-relations = { version = "^0.4.0", default-features = false  }
+ark-poly = { version = "^0.4.0", default-features = false  }
+ark-poly-commit = { version = "^0.4.0", default-features = false  }
+ark-r1cs-std = { version = "^0.4.0", default-features = false }
+ark-snark = { version = "^0.4.0", default-features = false }
+ark-serialize = { version = "^0.4.0", default-features = false }
+ark-crypto-primitives = { version = "^0.4.0", default-features = true, features = [ "r1cs", "crh" ] }
+#ark-crypto-primitives = { git = "https://github.com/ihyunnam/fork-ark-crypto-primitives-0.4.0.git", rev = "f34bfa0", default-features = false, features = ["r1cs"] }
 #ark-crypto-primitives_04 = { package = "ark-crypto-primitives", version = "0.4.0", default-features = false, features = ["sponge"] }
-ark-sponge = { version = "^0.3.0", default-features = false, features = ["r1cs"] }
-#ark-snark = { version = "0.3.0", default-features = true }
-ark-groth16 = { version = "0.3.0", default-features = true }
+ark-sponge = { version = "^0.4.0-alpha", default-features = false, features = ["r1cs"] }
+#ark-snark = { version = "0.4.0", default-features = true }
+ark-groth16 = { version = "0.4.0", default-features = true }
 
 # ADDED FOR MUSIG2 (AGGREGATABLE SCHNORR)
 musig2 = { version = "0.0.11", default-features = true }
 sha2 = { version = "0.10.8", default-features = false }
 subtle = { version = "2.5.0", default-features = false }
-ark-bls12-381 = { version = "^0.3.0", default-features = true }
 
 # we use our fork of marlin crate, branch "use-constraint-system-directly"
 ark-marlin = { git = "https://github.com/Entropy1729/marlin.git", branch = "use-constraint-system-directly" }
