@@ -1,9 +1,11 @@
-use ark_crypto_primitives::crh::CRHScheme;
+use ark_crypto_primitives::crh::poseidon::constraints::CRHGadget;
+use ark_crypto_primitives::crh::{CRHScheme, CRHSchemeGadget};
 use ark_crypto_primitives::sponge::Absorb;
 // use ark_crypto_primitives::crh::pedersen::constraints::CRHParametersVar;
 use ark_crypto_primitives_03::{SignatureScheme};
-use ark_bn254::FrConfig;
-use ark_ed_on_bn254::EdwardsConfig;
+// use ark_bn254::FrConfig;
+use ark_ed_on_bn254::{EdwardsAffine, EdwardsProjective, EdwardsConfig};
+use ark_bn254::Fr;
 use ark_std::UniformRand;
 // use ark_ed25519::ConstraintF<C>;
 // use ark_ed25519::{Bn254, ConstraintF<C>Parameters};
@@ -16,8 +18,6 @@ use ark_r1cs_std::{alloc::AllocationMode, R1CSVar};
 // use ark_crypto_primitives::crh::poseidon::PoseidonRoundParams;
 use ark_crypto_primitives::crh::poseidon::{CRH, constraints::CRHParametersVar};
 use ark_crypto_primitives::signature::schnorr::PublicKey;
-
-type Fr = Fp<MontBackend<FrConfig, 4>, 4>;
 
 // use super::schnorr::MyPoseidonParams;
 use super::{
@@ -102,7 +102,7 @@ where
         let prover_response = signature.prover_response.clone();
         let verifier_challenge = signature.verifier_challenge.value().unwrap_or(vec![0u8;32]).clone();
 
-        let poseidon_params = &poseidon_params.parameters;
+        // let poseidon_params = &poseidon_params.parameters;
 
         let pubkey_u8 = public_key.pub_key.value().unwrap_or(vec![0u8;32]);
 
@@ -113,16 +113,18 @@ where
         // final_nonce_xonly.serialize_with_mode(&mut input_vector, Compress::Yes);
         let final_nonce_xonly = MaybeScalar::from_be_bytes_mod_order(&verifier_challenge);
         // input_vector.clear();
-        let hash1 = CRH::<Fr>::evaluate(poseidon_params, [final_nonce_xonly]).unwrap();
+        let hash1 = CRHGadget::<Fr>::evaluate(poseidon_params, [signature.verifier_challenge]).unwrap();
         
         // pubkey_affine.serialize_with_mode(&mut input_vector, Compress::Yes);
         let aggregated_pubkey = MaybeScalar::from_be_bytes_mod_order(&pubkey_u8);
         // input_vector.clear();
-        let hash2 = CRH::<Fr>::evaluate(poseidon_params, [aggregated_pubkey]).unwrap();
+        let hash1 = CRHGadget::<Fr>::evaluate(poseidon_params, [aggregated_pubkey]).unwrap();
+        // let hash2 = CRH::<Fr>::evaluate(poseidon_params, [aggregated_pubkey]).unwrap();
 
         // message.serialize_with_mode(&mut input_vector, Compress::Yes);
         let message = MaybeScalar::from_be_bytes_mod_order(message.as_ref());
-        let hash3 = CRH::<Fr>::evaluate(poseidon_params, [message]).unwrap();
+        let hash1 = CRHGadget::<Fr>::evaluate(poseidon_params, [message]).unwrap();
+        // let hash3 = CRH::<Fr>::evaluate(poseidon_params, [message]).unwrap();
 
         let mut final_vector: Vec<u8> = vec![];
         let mut temp_vector = vec![];

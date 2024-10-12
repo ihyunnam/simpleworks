@@ -12,8 +12,8 @@ use ark_r1cs_std::{
 };
 use ark_relations::r1cs::{Namespace, SynthesisError};
 use derivative::Derivative;
-use ark_ed25519::Fr;
-
+use ark_ed_on_bn254::{EdwardsAffine, EdwardsProjective, EdwardsConfig};
+use ark_bn254::Fr;
 use super::schnorr::Signature;
 
 #[derive(Derivative)]

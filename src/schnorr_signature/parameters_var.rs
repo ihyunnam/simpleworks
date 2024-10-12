@@ -2,7 +2,9 @@ use std::{borrow::Borrow, marker::PhantomData};
 use ark_serialize::{CanonicalSerialize, Compress};
 use ark_crypto_primitives::encryption::elgamal::constraints::ConstraintF;
 use ark_ec::{short_weierstrass::Affine, AffineRepr, CurveGroup};
-use ark_ed25519::{EdwardsAffine, EdwardsProjective, FrConfig};
+// use ark_ed25519::{EdwardsAffine, EdwardsProjective, FrConfig};
+use ark_ed_on_bn254::{EdwardsAffine, EdwardsProjective, EdwardsConfig};
+use ark_bn254::Fr;
 use ark_ff::{Fp, MontBackend};
 // use ark_ec::CurveGroup;
 use ark_r1cs_std::{
@@ -13,7 +15,7 @@ use ark_relations::r1cs::{Namespace, SynthesisError};
 use bitvec::view::BitView;
 
 use super::schnorr::Parameters;
-type Fr = Fp<MontBackend<FrConfig, 4>, 4>;
+// type Fr = Fp<MontBackend<EdwardsConfig, 4>, 4>;
 
 #[derive(Clone)]
 // pub struct ParametersVar<C: CurveGroup, GC: CurveVar<C, ConstraintF<C>>>
@@ -31,7 +33,7 @@ where
     C: CurveGroup,
     // GC: CurveVar<C, ConstraintF<C>>,
     // for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
-    <C as CurveGroup>::Affine: From<ark_ec::twisted_edwards::Affine<ark_ed25519::EdwardsConfig>>,
+    <C as CurveGroup>::Affine: From<ark_ec::twisted_edwards::Affine<EdwardsConfig>>,
 {
     fn new_variable<T: Borrow<Parameters>>(
         cs: impl Into<Namespace<Fr>>,

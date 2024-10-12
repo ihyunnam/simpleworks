@@ -2,7 +2,9 @@ use ark_serialize::CanonicalSerialize;
 use super::schnorr::PublicKey;
 // use ark_bls12_381::Fr;
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ed25519::{EdwardsAffine, EdwardsConfig, EdwardsProjective, FrConfig};
+use ark_ed_on_bn254::{EdwardsAffine, EdwardsProjective, EdwardsConfig};
+use ark_bn254::Fr;
+// use ark_ed25519::{EdwardsAffine, EdwardsConfig, EdwardsProjective, FrConfig};
 use ark_ff::{Field, Fp, MontBackend};
 use ark_r1cs_std::{bits::uint8::UInt8, prelude::*};
 use ark_relations::r1cs::{Namespace, SynthesisError};
@@ -10,7 +12,7 @@ use ark_serialize::Compress;
 use ark_std::vec::Vec;
 use core::{borrow::Borrow, marker::PhantomData};
 use derivative::Derivative;
-type Fr = Fp<MontBackend<FrConfig, 4>, 4>;
+// type Fr = Fp<MontBackend<FrConfig, 4>, 4>;
 type ConstraintF<C> = <<C as CurveGroup>::BaseField as Field>::BasePrimeField;
 
 #[derive(Derivative)]
@@ -33,7 +35,7 @@ where
     // GC: CurveVar<C, ConstraintF<C>>,
     // for<'group_ops_bounds> &'group_ops_bounds GC: GroupOpsBounds<'group_ops_bounds, C, GC>,
     // <C as CurveGroup>::Affine: From<ark_ec::twisted_edwards::Affine<ark_ed25519::EdwardsConfig>>
-    C: CurveGroup<Affine = ark_ec::twisted_edwards::Affine<ark_ed25519::EdwardsConfig>>,
+    C: CurveGroup<Affine = ark_ec::twisted_edwards::Affine<EdwardsConfig>>,
 {
     fn new_variable<T: Borrow<PublicKey>>(
         cs: impl Into<Namespace<Fr>>,
